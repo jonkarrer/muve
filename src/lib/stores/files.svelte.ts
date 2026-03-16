@@ -1,0 +1,107 @@
+import type { FileNode, FileAction } from "$lib/tauri/types";
+
+interface OpenFile {
+  path: string;
+  content: string;
+  language: string;
+  dirty: boolean;
+}
+
+interface RecentTouch {
+  action: string;
+  timestamp: number;
+}
+
+let tree = $state<FileNode[]>([]);
+let activeAgentFile = $state<string | null>(null);
+let activeAgentAction = $state<FileAction["kind"] | null>(null);
+let recentlyTouched = $state<Map<string, RecentTouch>>(new Map());
+let expandedDirs = $state<Set<string>>(new Set());
+let selectedFile = $state<string | null>(null);
+let openFiles = $state<OpenFile[]>([]);
+let activeTabIndex = $state(0);
+
+let activeFile = $derived(openFiles[activeTabIndex] ?? null);
+let fileCount = $derived(countFiles(tree));
+
+function setTree(newTree: FileNode[]) {
+  tree = newTree;
+}
+
+function setActiveAgentFile(path: string | null, action?: FileAction["kind"]) {
+  activeAgentFile = path;
+  activeAgentAction = action ?? null;
+
+  if (path) {
+    const parts = path.split("/");
+    for (let i = 0; i < parts.length - 1; i++) {
+      expandedDirs.add(parts.slice(0, i + 1).join("/"));
+    }
+  }
+}
+
+function addRecentlyTouched(path: string, action: string) {
+  recentlyTouched.set(path, { action, timestamp: Date.now() });
+  setTimeout(() => {
+    recentlyTouched.delete(path);
+  }, 5000);
+}
+
+function toggleDir(path: string) {
+  if (expandedDirs.has(path)) {
+    expandedDirs.delete(path);
+  } else {
+    expandedDirs.add(path);
+  }
+}
+
+function selectFile(path: string) {
+  selectedFile = path;
+}
+
+function openFileInTab(path: string, content: string, language = "text") {
+  const existing = openFiles.findIndex((f) => f.path === path);
+  if (existing >= 0) {
+    activeTabIndex = existing;
+    return;
+  }
+  openFiles.push({ path, content, language, dirty: false });
+  activeTabIndex = openFiles.length - 1;
+}
+
+function closeTab(index: number) {
+  openFiles.splice(index, 1);
+  if (activeTabIndex >= openFiles.length) {
+    activeTabIndex = Math.max(0, openFiles.length - 1);
+  }
+}
+
+function countFiles(nodes: FileNode[]): number {
+  let count = 0;
+  for (const n of nodes) {
+    if (n.is_dir && n.children) count += countFiles(n.children);
+    else count++;
+  }
+  return count;
+}
+
+export const filesStore = {
+  get tree() { return tree; },
+  get activeAgentFile() { return activeAgentFile; },
+  get activeAgentAction() { return activeAgentAction; },
+  get recentlyTouched() { return recentlyTouched; },
+  get expandedDirs() { return expandedDirs; },
+  get selectedFile() { return selectedFile; },
+  get openFiles() { return openFiles; },
+  get activeTabIndex() { return activeTabIndex; },
+  get activeFile() { return activeFile; },
+  get fileCount() { return fileCount; },
+
+  setTree,
+  setActiveAgentFile,
+  addRecentlyTouched,
+  toggleDir,
+  selectFile,
+  openFileInTab,
+  closeTab,
+};

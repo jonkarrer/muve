@@ -1,0 +1,80 @@
+@import "tailwindcss";
+
+@theme {
+  --font-mono: 'JetBrains Mono', 'IBM Plex Mono', 'Fira Code', 'Cascadia Code', monospace;
+
+  --color-bg: #0a0e14;
+  --color-bg-panel: #0d1117;
+  --color-bg-surface: #131922;
+  --color-bg-hover: #1a2233;
+  --color-bg-active: #1e2a3a;
+
+  --color-border: #1e2a3a;
+  --color-border-bright: #2d3f56;
+
+  --color-text: #c5cdd8;
+  --color-text-muted: #5c6a7a;
+  --color-text-dim: #3d4b5c;
+
+  --color-accent: #22d68a;
+  --color-accent-dim: #1a9e66;
+
+  --color-muve-blue: #4d9cf0;
+  --color-muve-amber: #f0a830;
+  --color-muve-red: #e8534a;
+  --color-muve-purple: #b07ee8;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-mono);
+}
+
+::selection {
+  background: rgba(34, 214, 138, 0.2);
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-border-bright);
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.2; }
+}
+
+.animate-blink {
+  animation: blink 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse-glow {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 1.5s ease-in-out infinite;
+}
