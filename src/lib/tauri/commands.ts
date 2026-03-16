@@ -1,56 +1,26 @@
-import type { FileNode, DiffHunk, AgentConfig } from "./types";
+import { invoke } from "@tauri-apps/api/core";
+import type { FileNode } from "./types";
 
-// Stub wrappers for v1 — console.log + mock returns
 export const fs = {
-  readFile: async (path: string): Promise<string> => {
-    console.log("[stub] readFile:", path);
-    return "";
-  },
+  readFile: (path: string) =>
+    invoke<string>("read_file", { path }),
 
-  writeFile: async (path: string, content: string): Promise<void> => {
-    console.log("[stub] writeFile:", path, content.length, "chars");
-  },
-
-  listDirectory: async (path: string): Promise<FileNode[]> => {
-    console.log("[stub] listDirectory:", path);
-    return [];
-  },
-
-  computeDiff: async (before: string, after: string): Promise<DiffHunk[]> => {
-    console.log("[stub] computeDiff");
-    return [];
-  },
+  listDirectory: (path: string) =>
+    invoke<FileNode[]>("list_directory", { path }),
 };
 
 export const agent = {
-  start: async (config: AgentConfig): Promise<void> => {
-    console.log("[stub] startAgent:", config);
-  },
+  sendMessage: (message: string) =>
+    invoke<void>("send_message", { message }),
 
-  send: async (message: string): Promise<void> => {
-    console.log("[stub] sendToAgent:", message);
-  },
-
-  stop: async (): Promise<void> => {
-    console.log("[stub] stopAgent");
-  },
+  isRunning: () =>
+    invoke<boolean>("is_agent_running"),
 };
 
-export const terminal = {
-  spawn: async (cwd?: string): Promise<string> => {
-    console.log("[stub] spawnTerminal:", cwd);
-    return "stub-terminal-id";
-  },
+export const project = {
+  getCwd: () =>
+    invoke<string>("get_cwd"),
 
-  write: async (id: string, data: string): Promise<void> => {
-    console.log("[stub] writeTerminal:", id);
-  },
-
-  resize: async (id: string, cols: number, rows: number): Promise<void> => {
-    console.log("[stub] resizeTerminal:", id, cols, rows);
-  },
-
-  kill: async (id: string): Promise<void> => {
-    console.log("[stub] killTerminal:", id);
-  },
+  setCwd: (path: string) =>
+    invoke<void>("set_cwd", { path }),
 };

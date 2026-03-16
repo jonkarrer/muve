@@ -1,5 +1,6 @@
 <script lang="ts">
   import { filesStore } from "$lib/stores/files.svelte";
+  import { fs as fsCommands } from "$lib/tauri/commands";
   import type { FileNode } from "$lib/tauri/types";
   import FileTreeNode from "./FileTreeNode.svelte";
 
@@ -15,9 +16,19 @@
 
   const fileIcons: Record<string, { icon: string; color: string }> = {
     py: { icon: "◆", color: "#22d68a" },
+    js: { icon: "◆", color: "#f0a830" },
+    ts: { icon: "◆", color: "#4d9cf0" },
+    rs: { icon: "◆", color: "#e8534a" },
     md: { icon: "◇", color: "#4d9cf0" },
     txt: { icon: "○", color: "#5c6a7a" },
+    json: { icon: "○", color: "#f0a830" },
+    toml: { icon: "○", color: "#f0a830" },
+    yaml: { icon: "○", color: "#b07ee8" },
+    yml: { icon: "○", color: "#b07ee8" },
     gitignore: { icon: "●", color: "#3d4b5c" },
+    svelte: { icon: "◆", color: "#e8534a" },
+    css: { icon: "◆", color: "#4d9cf0" },
+    html: { icon: "◆", color: "#e8534a" },
   };
 
   let isAgentActive = $derived(filesStore.activeAgentFile === node.path);
@@ -28,14 +39,29 @@
     isAgentActive ? actionColors[filesStore.activeAgentAction!] ?? "transparent" : "transparent"
   );
 
-  function handleClick() {
+  async function handleClick() {
     if (node.is_dir) {
       filesStore.toggleDir(node.path);
     } else {
       filesStore.selectFile(node.path);
-      const content = node.content ?? "";
-      filesStore.openFileInTab(node.path, content, node.language ?? "text");
+      try {
+        const content = await fsCommands.readFile(node.path);
+        const lang = detectLanguage(node.name);
+        filesStore.openFileInTab(node.path, content, lang);
+      } catch (e) {
+        console.error("Failed to read file:", e);
+      }
     }
+  }
+
+  function detectLanguage(name: string): string {
+    const ext = name.split(".").pop()?.toLowerCase() ?? "";
+    const langMap: Record<string, string> = {
+      py: "python", js: "javascript", ts: "javascript",
+      rs: "rust", json: "json", md: "markdown",
+      svelte: "html", html: "html", css: "css",
+    };
+    return langMap[ext] ?? "text";
   }
 
   function getFileIcon(name: string) {
@@ -60,7 +86,7 @@
     <span class="text-[8px] mr-1.5" style:color={fi.color}>{fi.icon}</span>
   {/if}
 
-  <span class:opacity-85={node.is_dir} class="text-left">{node.name}</span>
+  <span class:opacity-85={node.is_dir} class="text-left truncate">{node.name}</span>
 
   {#if node.is_dir}
     <span class="ml-auto text-[10px] text-[--color-text-dim] pr-2">{node.children?.length ?? 0}</span>

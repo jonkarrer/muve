@@ -17,9 +17,9 @@
         <span class="text-[11px] opacity-50">the agent will read, create, and edit your files</span>
         <button
           onclick={() => startDemo()}
-          class="mt-3 cursor-pointer text-[11px] text-[--color-accent] px-4 py-1.5 rounded border border-[--color-accent-dim]/25 bg-[--color-accent]/8 hover:bg-[--color-accent-dim]/15 transition-colors"
+          class="mt-3 cursor-pointer text-[11px] text-[--color-text-muted] px-4 py-1.5 rounded border border-[--color-border] hover:bg-[--color-bg-hover] transition-colors"
         >
-          ▶ watch a demo
+          ▶ or watch a demo
         </button>
       </div>
     {:else}
@@ -28,17 +28,21 @@
       {/each}
 
       {#if chatStore.isStreaming}
-        <div class="px-4 py-2 pl-[52px]">
-          <span class="text-[12px] text-[--color-text]">
-            {chatStore.streamingContent}<span class="animate-pulse">▌</span>
-          </span>
+        <div class="flex gap-2.5 px-4 py-2">
+          <div class="w-[26px] h-[26px] rounded shrink-0 bg-[--color-accent]/8 border border-[--color-accent-dim]/20 flex items-center justify-center text-[11px] text-[--color-accent] font-semibold">
+            A
+          </div>
+          <div class="flex-1 min-w-0 pt-0.5 text-[13px] text-[--color-text] leading-relaxed whitespace-pre-wrap">
+            {chatStore.streamingContent}<span class="animate-pulse text-[--color-accent]">▌</span>
+          </div>
         </div>
       {/if}
 
-      {#if agentStore.status === "active" && !chatStore.isStreaming}
+      {#if (agentStore.status === "active" || agentStore.status === "thinking") && !chatStore.isStreaming}
         <div class="px-4 py-2 pl-[52px]">
           <span class="text-[12px] text-[--color-accent-dim]">
-            <span class="animate-blink">●</span> working...
+            <span class="animate-blink">●</span>
+            {agentStore.status === "thinking" ? "thinking..." : "working..."}
           </span>
         </div>
       {/if}
