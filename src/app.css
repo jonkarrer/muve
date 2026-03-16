@@ -71,10 +71,11 @@ html, body {
 }
 
 @keyframes pulse-glow {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.6; }
+  0%, 100% { background: rgba(34, 214, 138, 0.15); }
+  50% { background: rgba(34, 214, 138, 0.05); }
 }
 
 .animate-pulse-glow {
-  animation: pulse-glow 1.5s ease-in-out infinite;
+  animation: pulse-glow 0.8s ease-in-out infinite;
+  border-left-color: var(--color-accent) !important;
 }

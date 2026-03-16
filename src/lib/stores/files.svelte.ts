@@ -15,8 +15,8 @@ interface RecentTouch {
 let tree = $state<FileNode[]>([]);
 let activeAgentFile = $state<string | null>(null);
 let activeAgentAction = $state<FileAction["kind"] | null>(null);
-let recentlyTouched = $state<Map<string, RecentTouch>>(new Map());
-let expandedDirs = $state<Set<string>>(new Set());
+let recentlyTouched = $state<Record<string, RecentTouch>>({});
+let expandedDirs = $state<Record<string, boolean>>({});
 let selectedFile = $state<string | null>(null);
 let openFiles = $state<OpenFile[]>([]);
 let activeTabIndex = $state(0);
@@ -35,24 +35,32 @@ function setActiveAgentFile(path: string | null, action?: FileAction["kind"]) {
   if (path) {
     const parts = path.split("/");
     for (let i = 0; i < parts.length - 1; i++) {
-      expandedDirs.add(parts.slice(0, i + 1).join("/"));
+      expandedDirs[parts.slice(0, i + 1).join("/")] = true;
     }
   }
 }
 
 function addRecentlyTouched(path: string, action: string) {
-  recentlyTouched.set(path, { action, timestamp: Date.now() });
+  recentlyTouched[path] = { action, timestamp: Date.now() };
   setTimeout(() => {
-    recentlyTouched.delete(path);
+    delete recentlyTouched[path];
   }, 5000);
 }
 
 function toggleDir(path: string) {
-  if (expandedDirs.has(path)) {
-    expandedDirs.delete(path);
+  if (expandedDirs[path]) {
+    delete expandedDirs[path];
   } else {
-    expandedDirs.add(path);
+    expandedDirs[path] = true;
   }
+}
+
+function isExpanded(path: string): boolean {
+  return !!expandedDirs[path];
+}
+
+function getRecentTouch(path: string): RecentTouch | undefined {
+  return recentlyTouched[path];
 }
 
 function selectFile(path: string) {
@@ -89,14 +97,14 @@ export const filesStore = {
   get tree() { return tree; },
   get activeAgentFile() { return activeAgentFile; },
   get activeAgentAction() { return activeAgentAction; },
-  get recentlyTouched() { return recentlyTouched; },
-  get expandedDirs() { return expandedDirs; },
   get selectedFile() { return selectedFile; },
   get openFiles() { return openFiles; },
   get activeTabIndex() { return activeTabIndex; },
   get activeFile() { return activeFile; },
   get fileCount() { return fileCount; },
 
+  isExpanded,
+  getRecentTouch,
   setTree,
   setActiveAgentFile,
   addRecentlyTouched,

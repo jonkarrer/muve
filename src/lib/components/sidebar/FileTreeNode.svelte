@@ -32,9 +32,9 @@
   };
 
   let isAgentActive = $derived(filesStore.activeAgentFile === node.path);
-  let recentTouch = $derived(filesStore.recentlyTouched.get(node.path));
+  let recentTouch = $derived(filesStore.getRecentTouch(node.path));
   let isSelected = $derived(filesStore.selectedFile === node.path);
-  let isExpanded = $derived(filesStore.expandedDirs.has(node.path));
+  let isExpanded = $derived(filesStore.isExpanded(node.path));
   let borderColor = $derived(
     isAgentActive ? actionColors[filesStore.activeAgentAction!] ?? "transparent" : "transparent"
   );
@@ -77,7 +77,7 @@
   class:text-[--color-accent]={isSelected && !isAgentActive}
   style:border-left-color={isSelected ? "var(--color-accent)" : borderColor}
   style:padding-left="{12 + depth * 16}px"
-  style:background={isSelected ? "rgba(34,214,138,0.08)" : isAgentActive ? "rgba(34,214,138,0.04)" : "transparent"}
+  style:background={isAgentActive ? "" : isSelected ? "rgba(34,214,138,0.08)" : "transparent"}
 >
   {#if node.is_dir}
     <span class="text-[--color-muve-amber] text-[11px] mr-1">{isExpanded ? "▾" : "▸"}</span>

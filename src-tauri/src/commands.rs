@@ -40,11 +40,30 @@ fn resolve_path(path: &str, cwd: &str) -> PathBuf {
 }
 
 fn relativize_path(path: &str, cwd: &str) -> String {
-    if let Ok(rel) = Path::new(path).strip_prefix(cwd) {
-        rel.to_string_lossy().to_string()
+    // Strip ./ prefix
+    let path = path.strip_prefix("./").unwrap_or(path);
+
+    // If absolute, strip cwd prefix
+    let result = if Path::new(path).is_absolute() {
+        // Try stripping cwd with and without trailing slash
+        let cwd_with_slash = if cwd.ends_with('/') {
+            cwd.to_string()
+        } else {
+            format!("{}/", cwd)
+        };
+        if let Some(rel) = path.strip_prefix(&cwd_with_slash) {
+            rel.to_string()
+        } else if let Ok(rel) = Path::new(path).strip_prefix(cwd) {
+            rel.to_string_lossy().to_string()
+        } else {
+            path.to_string()
+        }
     } else {
         path.to_string()
-    }
+    };
+
+    // Strip any remaining ./ prefix from the result
+    result.strip_prefix("./").unwrap_or(&result).to_string()
 }
 
 fn build_tree(dir: &Path, relative_base: &str, max_depth: usize, depth: usize) -> std::io::Result<Vec<FileNode>> {
@@ -324,6 +343,16 @@ async fn run_agent(
 
                 // Process tool_use blocks for file actions
                 if let Some(content) = value["message"]["content"].as_array() {
+                    let tool_blocks: Vec<_> = content
+                        .iter()
+                        .filter(|b| b["type"].as_str() == Some("tool_use"))
+                        .collect();
+                    eprintln!(
+                        "[muve] assistant turn: {} content blocks, {} tool_use blocks",
+                        content.len(),
+                        tool_blocks.len()
+                    );
+
                     for block in content {
                         if block["type"].as_str() != Some("tool_use") {
                             continue;
@@ -331,6 +360,7 @@ async fn run_agent(
 
                         let name = block["name"].as_str().unwrap_or("");
                         let input = &block["input"];
+                        eprintln!("[muve] tool_use: name={}, input_keys={:?}", name, input.as_object().map(|o| o.keys().collect::<Vec<_>>()));
 
                         let action = match name {
                             "Read" => {
@@ -401,6 +431,7 @@ async fn run_agent(
                             _ => continue,
                         };
 
+                        eprintln!("[muve] emitting agent:action: {}", action);
                         let _ = app.emit("agent:action", action);
                     }
                 }

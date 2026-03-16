@@ -16,6 +16,7 @@ import type { AgentStatus, FileAction } from "$lib/tauri/types";
 let thinkingAccum = "";
 let streamId: string | null = null;
 let unlisteners: (() => void)[] = [];
+let highlightSeq = 0;
 
 export async function setupAgentListeners() {
   // Clean up any previous listeners
@@ -67,7 +68,8 @@ export async function setupAgentListeners() {
     }),
 
     onAgentAction((action: FileAction) => {
-      const path = "path" in action ? action.path : "";
+      const path = "path" in action ? (action as any).path : "";
+      console.log("[muve] agent:action received:", action.kind, path);
 
       chatStore.addMessage({
         role: "agent",
@@ -82,19 +84,25 @@ export async function setupAgentListeners() {
         status: "applied",
       });
 
-      // Highlight in file tree
+      // Highlight in file tree — use sequence number to prevent race conditions
       if (path) {
+        highlightSeq++;
+        const mySeq = highlightSeq;
+        console.log("[muve] highlighting file:", path, "tree has", filesStore.tree.length, "root nodes");
         filesStore.setActiveAgentFile(path, action.kind);
+        filesStore.addRecentlyTouched(path, action.kind);
         setTimeout(() => {
-          filesStore.setActiveAgentFile(null);
-          filesStore.addRecentlyTouched(path, action.kind);
-        }, 800);
+          // Only clear if no newer highlight has been set
+          if (highlightSeq === mySeq) {
+            filesStore.setActiveAgentFile(null);
+          }
+        }, 1500);
       }
 
       // Open created files in editor
       if (action.kind === "create" && "content" in action) {
         filesStore.selectFile(path);
-        filesStore.openFileInTab(path, action.content, "text");
+        filesStore.openFileInTab(path, (action as any).content, "text");
       }
     }),
 
