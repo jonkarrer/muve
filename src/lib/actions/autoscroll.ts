@@ -1,8 +1,15 @@
 import type { Action } from "svelte/action";
 
 export const autoscroll: Action<HTMLDivElement> = (node) => {
+  let rafId: number | null = null;
+
   const observer = new MutationObserver(() => {
-    node.scrollTo({ top: node.scrollHeight, behavior: "smooth" });
+    // Coalesce rapid mutations into a single scroll via rAF
+    if (rafId !== null) return;
+    rafId = requestAnimationFrame(() => {
+      node.scrollTop = node.scrollHeight;
+      rafId = null;
+    });
   });
 
   observer.observe(node, { childList: true, subtree: true, characterData: true });
@@ -10,6 +17,7 @@ export const autoscroll: Action<HTMLDivElement> = (node) => {
   return {
     destroy() {
       observer.disconnect();
+      if (rafId !== null) cancelAnimationFrame(rafId);
     },
   };
 };

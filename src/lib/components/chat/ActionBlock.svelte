@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { AgentActionMessage } from "$lib/tauri/types";
+  import type { AgentActionMessage, FileAction } from "$lib/tauri/types";
   import { filesStore } from "$lib/stores/files.svelte";
   import { fs as fsCommands } from "$lib/tauri/commands";
   import ActionBadge from "./ActionBadge.svelte";
@@ -9,24 +9,27 @@
   let { msg }: { msg: AgentActionMessage } = $props();
 
   let action = $derived(msg.action);
-  let path = $derived(
-    action.kind === "run" ? ("command" in action ? action.command : "")
-    : "path" in action ? action.path
-    : "old_path" in action ? action.old_path
-    : ""
-  );
-  let displayPath = $derived(
-    action.kind === "run" ? ("command" in action ? action.command : "")
-    : "path" in action ? action.path
-    : ""
-  );
-  let lineRange = $derived(action.kind === "read" && "line_range" in action && action.line_range ? `L${action.line_range[0]}-${action.line_range[1]}` : "");
+
+  let displayLabel = $derived(getDisplayLabel(action));
+  let isRunAction = $derived(action.kind === "run");
   let hasDiff = $derived(action.kind === "edit" && "diff" in action && action.diff.length > 0);
-  let hasPreview = $derived(action.kind === "create" && "content" in action && action.content);
+  let hasPreview = $derived(action.kind === "create" && "content" in action && !!action.content);
+
+  function getDisplayLabel(a: FileAction): string {
+    if (a.kind === "run" && "command" in a) return a.command;
+    if ("path" in a) return a.path;
+    if ("old_path" in a) return a.old_path;
+    return "";
+  }
+
+  function getFilePath(a: FileAction): string {
+    if ("path" in a) return a.path;
+    return "";
+  }
 
   async function handleFileClick() {
-    if (action.kind === "run") return;
-    const filePath = "path" in action ? action.path : "";
+    if (isRunAction) return;
+    const filePath = getFilePath(action);
     if (!filePath) return;
 
     filesStore.selectFile(filePath);
@@ -55,20 +58,15 @@
         class:border-[--color-border]={hasDiff || hasPreview}
       >
         <ActionBadge type={action.kind} />
-        {#if action.kind === "run"}
-          <span class="text-[12.5px] text-[--color-muve-purple] truncate">
-            {displayPath}
-          </span>
+        {#if isRunAction}
+          <span class="text-[12.5px] text-[--color-muve-purple] truncate">{displayLabel}</span>
         {:else}
           <button
             onclick={handleFileClick}
             class="text-[12.5px] text-[--color-muve-blue] cursor-pointer hover:underline bg-transparent border-none truncate"
           >
-            {displayPath}
+            {displayLabel}
           </button>
-        {/if}
-        {#if lineRange}
-          <span class="text-[11px] text-[--color-text-dim]">{lineRange}</span>
         {/if}
       </div>
 

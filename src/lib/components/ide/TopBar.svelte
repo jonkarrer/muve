@@ -1,5 +1,6 @@
 <script lang="ts">
   import { ideStore } from "$lib/stores/ide.svelte";
+  import { filesStore } from "$lib/stores/files.svelte";
   import { project } from "$lib/tauri/commands";
   import { refreshFileTree } from "$lib/agent/handler";
   import { startDemo } from "$lib/demo/runner";
@@ -24,6 +25,7 @@
       if (selected) {
         await project.setCwd(selected);
         cwd = selected;
+        filesStore.resetProject();
         await refreshFileTree();
       }
     } catch (e) {

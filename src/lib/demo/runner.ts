@@ -41,11 +41,9 @@ function processMessage(msg: Message) {
     if (path) {
       filesStore.setActiveAgentFile(path, action.kind);
 
-      // Open file in editor for creates and reads
       if (action.kind === "create") {
         filesStore.selectFile(path);
         filesStore.openFileInTab(path, action.content, action.language ?? "python");
-        ideStore.toggleFilePanel();
         if (!ideStore.showFilePanel) ideStore.toggleFilePanel();
       } else if (action.kind === "read") {
         const content = action.content ?? findFileContent(path);
@@ -53,16 +51,15 @@ function processMessage(msg: Message) {
         filesStore.openFileInTab(path, content);
       }
 
-      // Clear highlight after 800ms
-      const clearTimeout_ = setTimeout(() => {
+      const t = setTimeout(() => {
         filesStore.setActiveAgentFile(null);
         filesStore.addRecentlyTouched(path, action.kind);
       }, 800);
-      timeouts.push(clearTimeout_);
+      timeouts.push(t);
     }
   } else if (msg.role === "agent" && msg.type === "text" && msg.thinking) {
     agentStore.setStatus("thinking");
-  } else if (msg.role === "agent" && msg.type === "text" && !("thinking" in msg && msg.thinking)) {
+  } else if (msg.role === "agent" && msg.type === "text" && !msg.thinking) {
     agentStore.setStatus("idle");
   }
 }
@@ -71,7 +68,6 @@ export function startDemo() {
   stop();
   running = true;
 
-  // Initialize file tree with demo data and expand src
   filesStore.setTree(demoFiles);
   filesStore.toggleDir("src");
   chatStore.clearMessages();
@@ -87,13 +83,13 @@ export function startDemo() {
       if (!running) return;
       processMessage(msg);
 
-      // Set idle after last message
       if (i === demoMessages.length - 1) {
-        const finalTimeout = setTimeout(() => {
+        const finalT = setTimeout(() => {
           agentStore.setStatus("idle");
           running = false;
+          timeouts = [];
         }, 500);
-        timeouts.push(finalTimeout);
+        timeouts.push(finalT);
       }
     }, cumulativeDelay);
     timeouts.push(t);

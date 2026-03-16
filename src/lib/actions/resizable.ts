@@ -8,9 +8,11 @@ interface ResizableParams {
 export const resizable: Action<HTMLDivElement, ResizableParams> = (node, params) => {
   let startPos = 0;
   let currentParams = params;
+  let dragging = false;
 
   function onMouseDown(e: MouseEvent) {
     e.preventDefault();
+    dragging = true;
     startPos = currentParams.direction === "horizontal" ? e.clientX : e.clientY;
     document.addEventListener("mousemove", onMouseMove);
     document.addEventListener("mouseup", onMouseUp);
@@ -26,6 +28,7 @@ export const resizable: Action<HTMLDivElement, ResizableParams> = (node, params)
   }
 
   function onMouseUp() {
+    dragging = false;
     document.removeEventListener("mousemove", onMouseMove);
     document.removeEventListener("mouseup", onMouseUp);
     document.body.style.cursor = "";
@@ -40,6 +43,12 @@ export const resizable: Action<HTMLDivElement, ResizableParams> = (node, params)
     },
     destroy() {
       node.removeEventListener("mousedown", onMouseDown);
+      if (dragging) {
+        document.removeEventListener("mousemove", onMouseMove);
+        document.removeEventListener("mouseup", onMouseUp);
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+      }
     },
   };
 };

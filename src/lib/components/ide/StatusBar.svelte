@@ -16,7 +16,5 @@
   </span>
   <span class="text-[--color-text-dim]">|</span>
   <span>{filesStore.fileCount} files</span>
-  <span class="text-[--color-text-dim]">|</span>
-  <span>python 3.12</span>
   <span class="ml-auto text-[--color-text-dim]">Muve v0.1.0</span>
 </div>

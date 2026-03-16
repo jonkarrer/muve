@@ -2,18 +2,16 @@
 // Handles: inline code, code blocks, bullets, bold
 
 export function renderMarkdown(text: string): string {
-  // Split code blocks
   const parts = text.split(/(```[\s\S]*?```)/g);
 
   return parts.map(part => {
     if (part.startsWith("```")) {
       const match = part.match(/```(\w*)\n?([\s\S]*?)```/);
-      const lang = match?.[1] ?? "";
+      const lang = escapeAttr(match?.[1] ?? "");
       const code = match?.[2]?.trim() ?? "";
-      return `<div class="my-2 rounded border border-[--color-border] bg-[--color-bg] overflow-hidden"><div class="code-block" data-lang="${lang}">${escapeHtml(code)}</div></div>`;
+      return `<div class="my-2 rounded border border-[--color-border] bg-[--color-bg] overflow-hidden"><pre class="code-block px-3 py-2 text-[12px] leading-[1.7] overflow-x-auto text-[--color-text]" data-lang="${lang}"><code>${escapeHtml(code)}</code></pre></div>`;
     }
 
-    // Process inline markdown
     let html = escapeHtml(part);
 
     // Bold
@@ -38,4 +36,8 @@ function escapeHtml(text: string): string {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+function escapeAttr(text: string): string {
+  return text.replace(/[^a-zA-Z0-9_-]/g, "");
 }

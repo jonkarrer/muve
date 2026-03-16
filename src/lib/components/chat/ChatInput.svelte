@@ -2,33 +2,33 @@
   import { chatStore } from "$lib/stores/chat.svelte";
   import { agentStore } from "$lib/stores/agent.svelte";
   import { agent } from "$lib/tauri/commands";
+  import { formatTimestamp } from "$lib/utils/time";
 
   let input = $state("");
 
+  let isDisabled = $derived(agentStore.status === "active" || agentStore.status === "thinking");
+
   async function handleSend() {
     const text = input.trim();
-    if (!text) return;
-    if (agentStore.status === "active" || agentStore.status === "thinking") return;
+    if (!text || isDisabled) return;
 
-    // Add user message to chat
     chatStore.addMessage({
       role: "user",
       id: crypto.randomUUID(),
-      timestamp: new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+      timestamp: formatTimestamp(),
       content: text,
     });
 
     input = "";
 
-    // Send to agent backend
     try {
       await agent.sendMessage(text);
-    } catch (e: any) {
+    } catch (e) {
       chatStore.addMessage({
         role: "agent",
         type: "text",
         id: crypto.randomUUID(),
-        timestamp: new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+        timestamp: formatTimestamp(),
         content: `Failed to send message: ${e}`,
       });
     }
@@ -40,8 +40,6 @@
       handleSend();
     }
   }
-
-  let isDisabled = $derived(agentStore.status === "active" || agentStore.status === "thinking");
 </script>
 
 <div class="px-4 py-3 border-t border-[--color-border] bg-[--color-bg-panel]">

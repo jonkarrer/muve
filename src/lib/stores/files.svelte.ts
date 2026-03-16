@@ -4,7 +4,6 @@ interface OpenFile {
   path: string;
   content: string;
   language: string;
-  dirty: boolean;
 }
 
 interface RecentTouch {
@@ -21,11 +20,26 @@ let selectedFile = $state<string | null>(null);
 let openFiles = $state<OpenFile[]>([]);
 let activeTabIndex = $state(0);
 
-let activeFile = $derived(openFiles[activeTabIndex] ?? null);
+let activeFile = $derived(
+  openFiles.length > 0 && activeTabIndex < openFiles.length
+    ? openFiles[activeTabIndex]
+    : null
+);
 let fileCount = $derived(countFiles(tree));
 
 function setTree(newTree: FileNode[]) {
   tree = newTree;
+}
+
+function resetProject() {
+  tree = [];
+  openFiles = [];
+  activeTabIndex = 0;
+  selectedFile = null;
+  activeAgentFile = null;
+  activeAgentAction = null;
+  recentlyTouched = {};
+  expandedDirs = {};
 }
 
 function setActiveAgentFile(path: string | null, action?: FileAction["kind"]) {
@@ -73,14 +87,16 @@ function openFileInTab(path: string, content: string, language = "text") {
     activeTabIndex = existing;
     return;
   }
-  openFiles.push({ path, content, language, dirty: false });
+  openFiles.push({ path, content, language });
   activeTabIndex = openFiles.length - 1;
 }
 
 function closeTab(index: number) {
   openFiles.splice(index, 1);
-  if (activeTabIndex >= openFiles.length) {
-    activeTabIndex = Math.max(0, openFiles.length - 1);
+  if (openFiles.length === 0) {
+    activeTabIndex = 0;
+  } else if (activeTabIndex >= openFiles.length) {
+    activeTabIndex = openFiles.length - 1;
   }
 }
 
@@ -106,6 +122,7 @@ export const filesStore = {
   isExpanded,
   getRecentTouch,
   setTree,
+  resetProject,
   setActiveAgentFile,
   addRecentlyTouched,
   toggleDir,

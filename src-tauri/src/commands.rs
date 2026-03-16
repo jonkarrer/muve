@@ -257,6 +257,7 @@ async fn run_agent(
         .map_err(|e| format!("Failed to start claude CLI: {}. Is it installed?", e))?;
 
     let stdout = child.stdout.take().ok_or("Failed to capture stdout")?;
+    let stderr = child.stderr.take();
     let reader = BufReader::new(stdout);
     let mut lines = reader.lines();
 
@@ -343,16 +344,6 @@ async fn run_agent(
 
                 // Process tool_use blocks for file actions
                 if let Some(content) = value["message"]["content"].as_array() {
-                    let tool_blocks: Vec<_> = content
-                        .iter()
-                        .filter(|b| b["type"].as_str() == Some("tool_use"))
-                        .collect();
-                    eprintln!(
-                        "[muve] assistant turn: {} content blocks, {} tool_use blocks",
-                        content.len(),
-                        tool_blocks.len()
-                    );
-
                     for block in content {
                         if block["type"].as_str() != Some("tool_use") {
                             continue;
@@ -360,7 +351,6 @@ async fn run_agent(
 
                         let name = block["name"].as_str().unwrap_or("");
                         let input = &block["input"];
-                        eprintln!("[muve] tool_use: name={}, input_keys={:?}", name, input.as_object().map(|o| o.keys().collect::<Vec<_>>()));
 
                         let action = match name {
                             "Read" => {
@@ -431,7 +421,6 @@ async fn run_agent(
                             _ => continue,
                         };
 
-                        eprintln!("[muve] emitting agent:action: {}", action);
                         let _ = app.emit("agent:action", action);
                     }
                 }
@@ -449,17 +438,20 @@ async fn run_agent(
         }
     }
 
-    // Wait for child to exit
+    // Read stderr and wait for child to exit
+    let err_output = if let Some(mut se) = stderr {
+        let mut buf = String::new();
+        let _ = tokio::io::AsyncReadExt::read_to_string(&mut se, &mut buf).await;
+        buf
+    } else {
+        String::new()
+    };
+
     let status = child.wait().await.map_err(|e| e.to_string())?;
     if !status.success() {
-        // Read stderr for error details
-        if let Some(mut stderr) = child.stderr.take() {
-            let mut err_output = String::new();
-            let mut stderr_reader = BufReader::new(&mut stderr);
-            let _ = tokio::io::AsyncReadExt::read_to_string(&mut stderr_reader, &mut err_output).await;
-            if !err_output.is_empty() {
-                return Err(format!("Claude exited with error: {}", err_output.trim()));
-            }
+        let detail = err_output.trim();
+        if !detail.is_empty() {
+            return Err(format!("Claude error: {}", detail));
         }
         return Err(format!("Claude exited with status: {}", status));
     }
