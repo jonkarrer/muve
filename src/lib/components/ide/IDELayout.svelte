@@ -1,8 +1,8 @@
 <script lang="ts">
   import { ideStore } from "$lib/stores/ide.svelte";
+  import { resizable } from "$lib/actions/resizable";
   import TopBar from "./TopBar.svelte";
   import StatusBar from "./StatusBar.svelte";
-  import ResizeHandle from "./ResizeHandle.svelte";
   import FileTree from "../sidebar/FileTree.svelte";
   import ChatPanel from "../chat/ChatPanel.svelte";
   import FilePanel from "../editor/FilePanel.svelte";
@@ -13,16 +13,10 @@
 
   <div class="flex flex-1 min-h-0">
     {#if ideStore.showSidebar}
-      <div
-        class="shrink-0 flex flex-col bg-[--color-bg-panel] border-r border-[--color-border]"
-        style:width="{ideStore.sidebarWidth}px"
-      >
+      <div class="shrink-0 flex flex-col bg-[--color-bg-panel] border-r border-[--color-border]" style:width="{ideStore.sidebarWidth}px">
         <FileTree />
       </div>
-      <ResizeHandle
-        direction="horizontal"
-        onresize={(d) => ideStore.setSidebarWidth(ideStore.sidebarWidth + d)}
-      />
+      <div use:resizable={{ direction: "horizontal", onresize: (d) => ideStore.setSidebarWidth(ideStore.sidebarWidth + d) }} class="w-1 cursor-col-resize hover:bg-[--color-accent]/20 transition-colors shrink-0"></div>
     {/if}
 
     <div class="flex flex-col flex-1 min-w-0">
@@ -32,14 +26,8 @@
         </div>
 
         {#if ideStore.showFilePanel}
-          <ResizeHandle
-            direction="horizontal"
-            onresize={(d) => ideStore.setFilePanelWidth(ideStore.filePanelWidth - d)}
-          />
-          <div
-            class="shrink-0 flex flex-col bg-[--color-bg-panel]"
-            style:width="{ideStore.filePanelWidth}px"
-          >
+          <div use:resizable={{ direction: "horizontal", onresize: (d) => ideStore.setFilePanelWidth(ideStore.filePanelWidth - d) }} class="w-1 cursor-col-resize hover:bg-[--color-accent]/20 transition-colors shrink-0"></div>
+          <div class="shrink-0 flex flex-col bg-[--color-bg-panel]" style:width="{ideStore.filePanelWidth}px">
             <FilePanel />
           </div>
         {/if}

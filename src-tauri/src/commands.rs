@@ -66,69 +66,38 @@ fn relativize_path(path: &str, cwd: &str) -> String {
     result.strip_prefix("./").unwrap_or(&result).to_string()
 }
 
-fn build_tree(dir: &Path, relative_base: &str, max_depth: usize, depth: usize) -> std::io::Result<Vec<FileNode>> {
-    if depth >= max_depth {
-        return Ok(vec![]);
-    }
+const IGNORE: &[&str] = &[
+    "node_modules", "target", "__pycache__", "build", "dist",
+    ".svelte-kit", "venv", ".venv", "env", ".git",
+];
 
-    let mut entries: Vec<FileNode> = vec![];
-    let mut dir_entries: Vec<_> = std::fs::read_dir(dir)?
-        .filter_map(|e| e.ok())
-        .collect();
+fn build_tree(dir: &Path, base: &str, max_depth: usize, depth: usize) -> std::io::Result<Vec<FileNode>> {
+    if depth >= max_depth { return Ok(vec![]); }
 
-    dir_entries.sort_by(|a, b| {
-        let a_dir = a.file_type().map(|t| t.is_dir()).unwrap_or(false);
-        let b_dir = b.file_type().map(|t| t.is_dir()).unwrap_or(false);
-        b_dir.cmp(&a_dir).then(a.file_name().cmp(&b.file_name()))
+    let mut raw: Vec<_> = std::fs::read_dir(dir)?.filter_map(|e| e.ok()).collect();
+    raw.sort_by(|a, b| {
+        let ad = a.file_type().map(|t| t.is_dir()).unwrap_or(false);
+        let bd = b.file_type().map(|t| t.is_dir()).unwrap_or(false);
+        bd.cmp(&ad).then(a.file_name().cmp(&b.file_name()))
     });
 
-    for entry in dir_entries {
+    let mut out = Vec::new();
+    for entry in raw {
         let name = entry.file_name().to_string_lossy().to_string();
-
-        if name.starts_with('.')
-            || name == "node_modules"
-            || name == "target"
-            || name == "__pycache__"
-            || name == "build"
-            || name == "dist"
-            || name == ".svelte-kit"
-            || name == "venv"
-            || name == ".venv"
-            || name == "env"
-        {
-            continue;
-        }
-
-        let path = entry.path();
-        let relative = if relative_base.is_empty() {
-            name.clone()
-        } else {
-            format!("{}/{}", relative_base, name)
-        };
+        if name.starts_with('.') || IGNORE.contains(&name.as_str()) { continue; }
 
         let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
-        let size = if !is_dir {
-            entry.metadata().ok().map(|m| m.len())
-        } else {
-            None
-        };
+        let rel = if base.is_empty() { name.clone() } else { format!("{}/{}", base, name) };
 
-        let children = if is_dir {
-            Some(build_tree(&path, &relative, max_depth, depth + 1)?)
-        } else {
-            None
-        };
-
-        entries.push(FileNode {
+        out.push(FileNode {
             name,
-            path: relative,
+            path: rel.clone(),
             is_dir,
-            children,
-            size,
+            children: if is_dir { Some(build_tree(&entry.path(), &rel, max_depth, depth + 1)?) } else { None },
+            size: if !is_dir { entry.metadata().ok().map(|m| m.len()) } else { None },
         });
     }
-
-    Ok(entries)
+    Ok(out)
 }
 
 fn compute_diff(old: &str, new: &str) -> Vec<serde_json::Value> {
