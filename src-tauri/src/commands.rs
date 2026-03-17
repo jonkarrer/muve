@@ -249,6 +249,7 @@ async fn run_agent(app: AppHandle, message: &str, cwd: &str, session_id: Option<
     let mut current_text = String::new();
     let mut block_types: Vec<String> = Vec::new();
     let mut had_text = false;
+    let mut recent_write_paths: Vec<String> = Vec::new();
 
     while let Ok(Some(line)) = lines.next_line().await {
         if line.trim().is_empty() { continue; }
@@ -296,10 +297,31 @@ async fn run_agent(app: AppHandle, message: &str, cwd: &str, session_id: Option<
                         let name = block["name"].as_str().unwrap_or("");
                         let input = &block["input"];
                         let action = match name {
-                            "Read" => serde_json::json!({ "kind": "read", "path": relativize_path(input["file_path"].as_str().unwrap_or(""), cwd) }),
-                            "Write" => serde_json::json!({ "kind": "create", "path": relativize_path(input["file_path"].as_str().unwrap_or(""), cwd), "content": input["content"].as_str().unwrap_or("") }),
-                            "Edit" => { let p = relativize_path(input["file_path"].as_str().unwrap_or(""), cwd); serde_json::json!({ "kind": "edit", "path": p, "diff": compute_diff(input["old_string"].as_str().unwrap_or(""), input["new_string"].as_str().unwrap_or("")) }) }
-                            "MultiEdit" => { let p = relativize_path(input["file_path"].as_str().unwrap_or(""), cwd); let mut d = Vec::new(); if let Some(edits) = input["edits"].as_array() { for e in edits { d.extend(compute_diff(e["old_string"].as_str().unwrap_or(""), e["new_string"].as_str().unwrap_or(""))); } } serde_json::json!({ "kind": "edit", "path": p, "diff": d }) }
+                            "Read" => {
+                                let p = relativize_path(input["file_path"].as_str().unwrap_or(""), cwd);
+                                // Skip redundant reads right after a write/edit to the same file
+                                if recent_write_paths.contains(&p) { continue; }
+                                serde_json::json!({ "kind": "read", "path": p })
+                            }
+                            "Write" => {
+                                let p = relativize_path(input["file_path"].as_str().unwrap_or(""), cwd);
+                                let full = resolve_path(&p, cwd);
+                                let kind = if full.exists() { "edit" } else { "create" };
+                                recent_write_paths.push(p.clone());
+                                serde_json::json!({ "kind": kind, "path": p, "content": input["content"].as_str().unwrap_or("") })
+                            }
+                            "Edit" => {
+                                let p = relativize_path(input["file_path"].as_str().unwrap_or(""), cwd);
+                                recent_write_paths.push(p.clone());
+                                serde_json::json!({ "kind": "edit", "path": p, "diff": compute_diff(input["old_string"].as_str().unwrap_or(""), input["new_string"].as_str().unwrap_or("")) })
+                            }
+                            "MultiEdit" => {
+                                let p = relativize_path(input["file_path"].as_str().unwrap_or(""), cwd);
+                                recent_write_paths.push(p.clone());
+                                let mut d = Vec::new();
+                                if let Some(edits) = input["edits"].as_array() { for e in edits { d.extend(compute_diff(e["old_string"].as_str().unwrap_or(""), e["new_string"].as_str().unwrap_or(""))); } }
+                                serde_json::json!({ "kind": "edit", "path": p, "diff": d })
+                            }
                             "Bash" => serde_json::json!({ "kind": "run", "command": input["command"].as_str().unwrap_or("") }),
                             "Glob" | "Grep" => serde_json::json!({ "kind": "read", "path": input["pattern"].as_str().or_else(|| input["glob"].as_str()).unwrap_or("") }),
                             _ => continue,
@@ -307,6 +329,7 @@ async fn run_agent(app: AppHandle, message: &str, cwd: &str, session_id: Option<
                         let _ = app.emit("agent:action", action);
                     }
                 }
+                recent_write_paths.clear();
                 current_text.clear(); current_thinking.clear(); block_types.clear(); had_text = false;
             }
             _ => {}
