@@ -24,6 +24,7 @@ pub fn run() {
             commands::read_file,
             commands::send_message,
             commands::is_agent_running,
+            commands::set_session_id,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Muve");

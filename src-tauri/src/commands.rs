@@ -196,6 +196,12 @@ pub async fn is_agent_running(state: State<'_, AppState>) -> Result<bool, String
     Ok(*state.is_running.lock().await)
 }
 
+#[tauri::command]
+pub async fn set_session_id(id: Option<String>, state: State<'_, AppState>) -> Result<(), String> {
+    *state.session_id.lock().await = id;
+    Ok(())
+}
+
 // --- Agent Runner ---
 
 async fn run_agent(
@@ -252,6 +258,7 @@ async fn run_agent(
                 if let Some(sid) = value["session_id"].as_str() {
                     let state = app.state::<AppState>();
                     *state.session_id.lock().await = Some(sid.to_string());
+                    let _ = app.emit("agent:session", sid);
                 }
             }
             "stream_event" => {

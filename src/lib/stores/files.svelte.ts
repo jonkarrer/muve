@@ -1,15 +1,8 @@
 import type { FileNode, FileAction } from "$lib/tauri/types";
 
-interface OpenFile {
-  path: string;
-  content: string;
-  language: string;
-}
-
-interface RecentTouch {
-  action: string;
-  timestamp: number;
-}
+interface OpenFile { path: string; content: string; language: string }
+interface RecentTouch { action: string; timestamp: number }
+export interface FilesSnapshot { openFiles: OpenFile[]; activeTabIndex: number; expandedDirs: Record<string, boolean>; selectedFile: string | null }
 
 let tree = $state<FileNode[]>([]);
 let activeAgentFile = $state<string | null>(null);
@@ -20,93 +13,13 @@ let selectedFile = $state<string | null>(null);
 let openFiles = $state<OpenFile[]>([]);
 let activeTabIndex = $state(0);
 
-let activeFile = $derived(
-  openFiles.length > 0 && activeTabIndex < openFiles.length
-    ? openFiles[activeTabIndex]
-    : null
-);
+let activeFile = $derived(openFiles.length > 0 && activeTabIndex < openFiles.length ? openFiles[activeTabIndex] : null);
 let fileCount = $derived(countFiles(tree));
 
-function setTree(newTree: FileNode[]) {
-  tree = newTree;
-}
-
-function resetProject() {
-  tree = [];
-  openFiles = [];
-  activeTabIndex = 0;
-  selectedFile = null;
-  activeAgentFile = null;
-  activeAgentAction = null;
-  recentlyTouched = {};
-  expandedDirs = {};
-}
-
-function setActiveAgentFile(path: string | null, action?: FileAction["kind"]) {
-  activeAgentFile = path;
-  activeAgentAction = action ?? null;
-
-  if (path) {
-    const parts = path.split("/");
-    for (let i = 0; i < parts.length - 1; i++) {
-      expandedDirs[parts.slice(0, i + 1).join("/")] = true;
-    }
-  }
-}
-
-function addRecentlyTouched(path: string, action: string) {
-  recentlyTouched[path] = { action, timestamp: Date.now() };
-  setTimeout(() => {
-    delete recentlyTouched[path];
-  }, 5000);
-}
-
-function toggleDir(path: string) {
-  if (expandedDirs[path]) {
-    delete expandedDirs[path];
-  } else {
-    expandedDirs[path] = true;
-  }
-}
-
-function isExpanded(path: string): boolean {
-  return !!expandedDirs[path];
-}
-
-function getRecentTouch(path: string): RecentTouch | undefined {
-  return recentlyTouched[path];
-}
-
-function selectFile(path: string) {
-  selectedFile = path;
-}
-
-function openFileInTab(path: string, content: string, language = "text") {
-  const existing = openFiles.findIndex((f) => f.path === path);
-  if (existing >= 0) {
-    activeTabIndex = existing;
-    return;
-  }
-  openFiles.push({ path, content, language });
-  activeTabIndex = openFiles.length - 1;
-}
-
-function closeTab(index: number) {
-  openFiles.splice(index, 1);
-  if (openFiles.length === 0) {
-    activeTabIndex = 0;
-  } else if (activeTabIndex >= openFiles.length) {
-    activeTabIndex = openFiles.length - 1;
-  }
-}
-
 function countFiles(nodes: FileNode[]): number {
-  let count = 0;
-  for (const n of nodes) {
-    if (n.is_dir && n.children) count += countFiles(n.children);
-    else count++;
-  }
-  return count;
+  let c = 0;
+  for (const n of nodes) { if (n.is_dir && n.children) c += countFiles(n.children); else c++; }
+  return c;
 }
 
 export const filesStore = {
@@ -119,14 +32,48 @@ export const filesStore = {
   get activeFile() { return activeFile; },
   get fileCount() { return fileCount; },
 
-  isExpanded,
-  getRecentTouch,
-  setTree,
-  resetProject,
-  setActiveAgentFile,
-  addRecentlyTouched,
-  toggleDir,
-  selectFile,
-  openFileInTab,
-  closeTab,
+  isExpanded(path: string) { return !!expandedDirs[path]; },
+  getRecentTouch(path: string) { return recentlyTouched[path] as RecentTouch | undefined; },
+  setTree(t: FileNode[]) { tree = t; },
+
+  resetProject() {
+    tree = []; openFiles = []; activeTabIndex = 0; selectedFile = null;
+    activeAgentFile = null; activeAgentAction = null; recentlyTouched = {}; expandedDirs = {};
+  },
+
+  setActiveAgentFile(path: string | null, action?: FileAction["kind"]) {
+    activeAgentFile = path; activeAgentAction = action ?? null;
+    if (path) { const parts = path.split("/"); for (let i = 0; i < parts.length - 1; i++) expandedDirs[parts.slice(0, i + 1).join("/")] = true; }
+  },
+
+  addRecentlyTouched(path: string, action: string) {
+    recentlyTouched[path] = { action, timestamp: Date.now() };
+    setTimeout(() => { delete recentlyTouched[path]; }, 5000);
+  },
+
+  toggleDir(path: string) { if (expandedDirs[path]) delete expandedDirs[path]; else expandedDirs[path] = true; },
+  selectFile(path: string) { selectedFile = path; },
+
+  openFileInTab(path: string, content: string, language = "text") {
+    const idx = openFiles.findIndex((f) => f.path === path);
+    if (idx >= 0) { activeTabIndex = idx; return; }
+    openFiles.push({ path, content, language });
+    activeTabIndex = openFiles.length - 1;
+  },
+
+  closeTab(index: number) {
+    openFiles.splice(index, 1);
+    if (openFiles.length === 0) activeTabIndex = 0;
+    else if (activeTabIndex >= openFiles.length) activeTabIndex = openFiles.length - 1;
+  },
+
+  snapshot(): FilesSnapshot {
+    return { openFiles: openFiles.map(f => ({ ...f })), activeTabIndex, expandedDirs: { ...expandedDirs }, selectedFile };
+  },
+
+  restore(snap: FilesSnapshot) {
+    openFiles = snap.openFiles; activeTabIndex = snap.activeTabIndex;
+    expandedDirs = snap.expandedDirs; selectedFile = snap.selectedFile;
+    activeAgentFile = null; activeAgentAction = null; recentlyTouched = {};
+  },
 };

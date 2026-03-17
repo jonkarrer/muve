@@ -1,8 +1,9 @@
-import { onAgentStatus, onAgentTextDelta, onAgentThinkingDelta, onAgentTurnEnd, onAgentAction, onAgentDone, onAgentError } from "$lib/tauri/events";
+import { onAgentStatus, onAgentTextDelta, onAgentThinkingDelta, onAgentTurnEnd, onAgentAction, onAgentDone, onAgentError, onAgentSession } from "$lib/tauri/events";
 import { fs as fsCommands, project } from "$lib/tauri/commands";
 import { chatStore } from "$lib/stores/chat.svelte";
 import { filesStore } from "$lib/stores/files.svelte";
 import { agentStore } from "$lib/stores/agent.svelte";
+import { sessionsStore } from "$lib/stores/sessions.svelte";
 import type { AgentStatus, FileAction } from "$lib/tauri/types";
 
 const ts = () => new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
@@ -16,6 +17,8 @@ export async function setupAgentListeners() {
   teardownAgentListeners();
   unlisteners = await Promise.all([
     onAgentStatus((s) => agentStore.setStatus(s as AgentStatus)),
+
+    onAgentSession((sid) => sessionsStore.updateClaudeSessionId(sid)),
 
     onAgentTextDelta((text) => {
       if (!streamId) { streamId = crypto.randomUUID(); chatStore.startStream(streamId); }

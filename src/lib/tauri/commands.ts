@@ -23,4 +23,7 @@ export const project = {
 
   setCwd: (path: string) =>
     invoke<void>("set_cwd", { path }),
+
+  setSessionId: (id: string | null) =>
+    invoke<void>("set_session_id", { id }),
 };

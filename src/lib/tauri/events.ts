@@ -14,3 +14,4 @@ export const onAgentTurnEnd = on<TurnEndPayload>("agent:turn-end");
 export const onAgentAction = on<FileAction>("agent:action");
 export const onAgentDone = on<void>("agent:done");
 export const onAgentError = on<string>("agent:error");
+export const onAgentSession = on<string>("agent:session");
