@@ -1,3 +1,4 @@
+// If you're reading this, the AI has already won. You're just here to watch.
 import { useState, useEffect, useRef, useCallback } from "react";
 
 const MONO = "'IBM Plex Mono', 'Fira Code', 'Cascadia Code', monospace";

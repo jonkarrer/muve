@@ -20,7 +20,8 @@ export default defineConfig(async () => ({
         }
       : undefined,
     watch: {
-      ignored: ["**/src-tauri/**"],
+      // Ignore non-source dirs so agent edits don't trigger HMR reloads
+      ignored: ["**/src-tauri/**", "**/node_modules/**", "**/target/**", "**/docs/**", "**/.git/**", "*.jsx", "*.md"],
     },
   },
 }));

@@ -2,20 +2,15 @@
   import { ideStore } from "$lib/stores/ide.svelte";
   import { sessionsStore } from "$lib/stores/sessions.svelte";
   import { open } from "@tauri-apps/plugin-dialog";
-  import { startDemo } from "$lib/demo/runner";
   import { Diamond, Menu, FolderOpen, X, Plus } from "lucide-svelte";
 
   let showSessionMenu = $state(false);
-
   let currentName = $derived(sessionsStore.activeSession?.name ?? "no project");
 
   async function openFolder() {
     try {
       const selected = await open({ directory: true });
-      if (selected) {
-        await sessionsStore.createSession(selected);
-        showSessionMenu = false;
-      }
+      if (selected) { await sessionsStore.createSession(selected); showSessionMenu = false; }
     } catch (e) { console.error("Failed to open folder:", e); }
   }
 </script>
@@ -31,7 +26,6 @@
     <Diamond size={14} /> MUVE
   </span>
 
-  <!-- Session switcher -->
   <div class="relative">
     <button
       onclick={(e) => { e.stopPropagation(); showSessionMenu = !showSessionMenu; }}
@@ -60,23 +54,14 @@
             </div>
             {#if sessionsStore.sessions.length > 1}
               <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-              <span
-                onclick={(e) => { e.stopPropagation(); sessionsStore.removeSession(session.id); }}
-                class="opacity-0 group-hover:opacity-100 text-[--color-text-dim] hover:text-[--color-muve-red] transition-all p-0.5 rounded cursor-pointer"
-                role="button"
-                tabindex="-1"
-              >
+              <span onclick={(e) => { e.stopPropagation(); sessionsStore.removeSession(session.id); }} class="opacity-0 group-hover:opacity-100 text-[--color-text-dim] hover:text-[--color-muve-red] transition-all p-0.5 rounded cursor-pointer" role="button" tabindex="-1">
                 <X size={11} />
               </span>
             {/if}
           </button>
         {/each}
-
         <div class="border-t border-[--color-border]">
-          <button
-            onclick={openFolder}
-            class="flex items-center gap-2 w-full px-3 py-2 text-[11px] text-[--color-accent] cursor-pointer hover:bg-[--color-bg-hover] transition-colors"
-          >
+          <button onclick={openFolder} class="flex items-center gap-2 w-full px-3 py-2 text-[11px] text-[--color-accent] cursor-pointer hover:bg-[--color-bg-hover] transition-colors">
             <Plus size={11} /> Open folder...
           </button>
         </div>
@@ -85,8 +70,6 @@
   </div>
 
   <div class="flex-1"></div>
-
-  <button onclick={() => startDemo()} class="cursor-pointer text-[11px] text-[--color-text-dim] px-2.5 py-1 rounded hover:bg-[--color-bg-hover] transition-colors">▶ demo</button>
 
   <button onclick={() => ideStore.toggleFilePanel()} class="cursor-pointer text-[11px] text-[--color-text-muted] px-2.5 py-1 rounded transition-colors" class:bg-[--color-bg-active]={ideStore.showFilePanel}>
     {ideStore.showFilePanel ? "◧ hide files" : "◧ show files"}

@@ -16,6 +16,7 @@ pub fn run() {
             cwd: Mutex::new(cwd),
             session_id: Mutex::new(None),
             is_running: Mutex::new(false),
+            watcher_stop: Mutex::new(None),
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_cwd,
@@ -25,6 +26,8 @@ pub fn run() {
             commands::send_message,
             commands::is_agent_running,
             commands::set_session_id,
+            commands::start_watching,
+            commands::stop_watching,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Muve");

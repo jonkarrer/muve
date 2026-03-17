@@ -15,3 +15,6 @@ export const onAgentAction = on<FileAction>("agent:action");
 export const onAgentDone = on<void>("agent:done");
 export const onAgentError = on<string>("agent:error");
 export const onAgentSession = on<string>("agent:session");
+
+export interface FsChangedPayload { paths: string[] }
+export const onFsChanged = on<FsChangedPayload>("fs:changed");

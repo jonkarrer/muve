@@ -26,4 +26,10 @@ export const project = {
 
   setSessionId: (id: string | null) =>
     invoke<void>("set_session_id", { id }),
+
+  startWatching: () =>
+    invoke<void>("start_watching"),
+
+  stopWatching: () =>
+    invoke<void>("stop_watching"),
 };

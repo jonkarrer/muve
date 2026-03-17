@@ -1,7 +1,10 @@
+use notify_debouncer_mini::{new_debouncer, DebouncedEventKind};
 use serde::{Deserialize, Serialize};
 use similar::{ChangeTag, TextDiff};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::mpsc as std_mpsc;
+use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
@@ -13,6 +16,7 @@ pub struct AppState {
     pub cwd: Mutex<String>,
     pub session_id: Mutex<Option<String>>,
     pub is_running: Mutex<bool>,
+    pub watcher_stop: Mutex<Option<std_mpsc::Sender<()>>>,
 }
 
 // --- Types ---
@@ -32,37 +36,17 @@ pub struct FileNode {
 
 fn resolve_path(path: &str, cwd: &str) -> PathBuf {
     let p = Path::new(path);
-    if p.is_absolute() {
-        p.to_path_buf()
-    } else {
-        Path::new(cwd).join(path)
-    }
+    if p.is_absolute() { p.to_path_buf() } else { Path::new(cwd).join(path) }
 }
 
 fn relativize_path(path: &str, cwd: &str) -> String {
-    // Strip ./ prefix
     let path = path.strip_prefix("./").unwrap_or(path);
-
-    // If absolute, strip cwd prefix
     let result = if Path::new(path).is_absolute() {
-        // Try stripping cwd with and without trailing slash
-        let cwd_with_slash = if cwd.ends_with('/') {
-            cwd.to_string()
-        } else {
-            format!("{}/", cwd)
-        };
-        if let Some(rel) = path.strip_prefix(&cwd_with_slash) {
-            rel.to_string()
-        } else if let Ok(rel) = Path::new(path).strip_prefix(cwd) {
-            rel.to_string_lossy().to_string()
-        } else {
-            path.to_string()
-        }
-    } else {
-        path.to_string()
-    };
-
-    // Strip any remaining ./ prefix from the result
+        let cwd_slash = if cwd.ends_with('/') { cwd.to_string() } else { format!("{}/", cwd) };
+        if let Some(rel) = path.strip_prefix(&cwd_slash) { rel.to_string() }
+        else if let Ok(rel) = Path::new(path).strip_prefix(cwd) { rel.to_string_lossy().to_string() }
+        else { path.to_string() }
+    } else { path.to_string() };
     result.strip_prefix("./").unwrap_or(&result).to_string()
 }
 
@@ -71,28 +55,29 @@ const IGNORE: &[&str] = &[
     ".svelte-kit", "venv", ".venv", "env", ".git",
 ];
 
+fn should_ignore(path: &Path) -> bool {
+    path.components().any(|c| {
+        let s = c.as_os_str().to_string_lossy();
+        s.starts_with('.') || IGNORE.contains(&s.as_ref())
+    })
+}
+
 fn build_tree(dir: &Path, base: &str, max_depth: usize, depth: usize) -> std::io::Result<Vec<FileNode>> {
     if depth >= max_depth { return Ok(vec![]); }
-
     let mut raw: Vec<_> = std::fs::read_dir(dir)?.filter_map(|e| e.ok()).collect();
     raw.sort_by(|a, b| {
         let ad = a.file_type().map(|t| t.is_dir()).unwrap_or(false);
         let bd = b.file_type().map(|t| t.is_dir()).unwrap_or(false);
         bd.cmp(&ad).then(a.file_name().cmp(&b.file_name()))
     });
-
     let mut out = Vec::new();
     for entry in raw {
         let name = entry.file_name().to_string_lossy().to_string();
         if name.starts_with('.') || IGNORE.contains(&name.as_str()) { continue; }
-
         let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
         let rel = if base.is_empty() { name.clone() } else { format!("{}/{}", base, name) };
-
         out.push(FileNode {
-            name,
-            path: rel.clone(),
-            is_dir,
+            name, path: rel.clone(), is_dir,
             children: if is_dir { Some(build_tree(&entry.path(), &rel, max_depth, depth + 1)?) } else { None },
             size: if !is_dir { entry.metadata().ok().map(|m| m.len()) } else { None },
         });
@@ -101,20 +86,12 @@ fn build_tree(dir: &Path, base: &str, max_depth: usize, depth: usize) -> std::io
 }
 
 fn compute_diff(old: &str, new: &str) -> Vec<serde_json::Value> {
-    let diff = TextDiff::from_lines(old, new);
-    diff.iter_all_changes()
-        .map(|change| {
-            let tag = match change.tag() {
-                ChangeTag::Delete => "remove",
-                ChangeTag::Insert => "add",
-                ChangeTag::Equal => "context",
-            };
-            serde_json::json!({
-                "type": tag,
-                "content": change.value().trim_end_matches('\n'),
-            })
+    TextDiff::from_lines(old, new).iter_all_changes().map(|change| {
+        serde_json::json!({
+            "type": match change.tag() { ChangeTag::Delete => "remove", ChangeTag::Insert => "add", ChangeTag::Equal => "context" },
+            "content": change.value().trim_end_matches('\n'),
         })
-        .collect()
+    }).collect()
 }
 
 // --- FS Commands ---
@@ -126,68 +103,115 @@ pub async fn get_cwd(state: State<'_, AppState>) -> Result<String, String> {
 
 #[tauri::command]
 pub async fn set_cwd(path: String, state: State<'_, AppState>) -> Result<(), String> {
-    let p = Path::new(&path);
-    if !p.is_dir() {
-        return Err(format!("{} is not a directory", path));
-    }
+    if !Path::new(&path).is_dir() { return Err(format!("{} is not a directory", path)); }
     *state.cwd.lock().await = path;
     Ok(())
 }
 
 #[tauri::command]
 pub async fn list_directory(path: String) -> Result<Vec<FileNode>, String> {
-    let p = Path::new(&path);
-    if !p.is_dir() {
-        return Err(format!("{} is not a directory", path));
-    }
-    build_tree(p, "", 6, 0).map_err(|e| e.to_string())
+    if !Path::new(&path).is_dir() { return Err(format!("{} is not a directory", path)); }
+    build_tree(Path::new(&path), "", 6, 0).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn read_file(path: String, state: State<'_, AppState>) -> Result<String, String> {
     let cwd = state.cwd.lock().await.clone();
     let full_path = resolve_path(&path, &cwd);
-    tokio::fs::read_to_string(&full_path)
-        .await
+    tokio::fs::read_to_string(&full_path).await
         .map_err(|e| format!("Failed to read {}: {}", full_path.display(), e))
+}
+
+// --- File Watcher ---
+
+#[tauri::command]
+pub async fn start_watching(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    // Stop existing watcher
+    if let Some(tx) = state.watcher_stop.lock().await.take() {
+        let _ = tx.send(());
+    }
+
+    let cwd = state.cwd.lock().await.clone();
+    let cwd_for_watcher = cwd.clone();
+    let (stop_tx, stop_rx) = std_mpsc::channel::<()>();
+    *state.watcher_stop.lock().await = Some(stop_tx);
+
+    // Spawn watcher on a blocking thread (notify uses std sync)
+    std::thread::spawn(move || {
+        let (tx, rx) = std_mpsc::channel();
+        let mut debouncer = match new_debouncer(Duration::from_millis(300), tx) {
+            Ok(d) => d,
+            Err(e) => { eprintln!("[muve] watcher error: {}", e); return; }
+        };
+
+        if let Err(e) = debouncer.watcher().watch(
+            Path::new(&cwd_for_watcher),
+            notify::RecursiveMode::Recursive,
+        ) {
+            eprintln!("[muve] watch error: {}", e);
+            return;
+        }
+
+        loop {
+            // Check for stop signal
+            if stop_rx.try_recv().is_ok() { break; }
+
+            match rx.recv_timeout(Duration::from_millis(100)) {
+                Ok(Ok(events)) => {
+                    let mut paths: Vec<String> = Vec::new();
+                    for event in events {
+                        if event.kind != DebouncedEventKind::Any { continue; }
+                        let p = event.path.to_string_lossy().to_string();
+                        if should_ignore(&event.path) { continue; }
+                        let rel = relativize_path(&p, &cwd_for_watcher);
+                        if !rel.is_empty() && !paths.contains(&rel) {
+                            paths.push(rel);
+                        }
+                    }
+                    if !paths.is_empty() {
+                        let _ = app.emit("fs:changed", serde_json::json!({ "paths": paths }));
+                    }
+                }
+                Ok(Err(e)) => { eprintln!("[muve] watcher recv error: {:?}", e); }
+                Err(std_mpsc::RecvTimeoutError::Timeout) => {}
+                Err(std_mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+        }
+    });
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn stop_watching(state: State<'_, AppState>) -> Result<(), String> {
+    if let Some(tx) = state.watcher_stop.lock().await.take() {
+        let _ = tx.send(());
+    }
+    Ok(())
 }
 
 // --- Agent Commands ---
 
 #[tauri::command]
-pub async fn send_message(
-    app: AppHandle,
-    message: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
+pub async fn send_message(app: AppHandle, message: String, state: State<'_, AppState>) -> Result<(), String> {
     {
         let mut running = state.is_running.lock().await;
-        if *running {
-            return Err("Agent is already processing a message".to_string());
-        }
+        if *running { return Err("Agent is already processing a message".to_string()); }
         *running = true;
     }
-
     let cwd = state.cwd.lock().await.clone();
     let session_id = state.session_id.lock().await.clone();
 
     tokio::spawn(async move {
         let result = run_agent(app.clone(), &message, &cwd, session_id.as_deref()).await;
-
         let state = app.state::<AppState>();
         *state.is_running.lock().await = false;
-
         match result {
-            Ok(_) => {
-                let _ = app.emit("agent:done", ());
-            }
-            Err(e) => {
-                let _ = app.emit("agent:error", &e);
-            }
+            Ok(_) => { let _ = app.emit("agent:done", ()); }
+            Err(e) => { let _ = app.emit("agent:error", &e); }
         }
         let _ = app.emit("agent:status", "idle");
     });
-
     Ok(())
 }
 
@@ -204,33 +228,18 @@ pub async fn set_session_id(id: Option<String>, state: State<'_, AppState>) -> R
 
 // --- Agent Runner ---
 
-async fn run_agent(
-    app: AppHandle,
-    message: &str,
-    cwd: &str,
-    session_id: Option<&str>,
-) -> Result<(), String> {
+async fn run_agent(app: AppHandle, message: &str, cwd: &str, session_id: Option<&str>) -> Result<(), String> {
     let _ = app.emit("agent:status", "thinking");
 
     let mut cmd = Command::new("claude");
-    cmd.arg("-p")
-        .arg(message)
-        .arg("--output-format")
-        .arg("stream-json")
-        .arg("--verbose")
-        .arg("--include-partial-messages")
-        .current_dir(cwd)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+    cmd.arg("-p").arg(message)
+        .arg("--output-format").arg("stream-json")
+        .arg("--verbose").arg("--include-partial-messages")
+        .arg("--permission-mode").arg("acceptEdits")
+        .current_dir(cwd).stdout(Stdio::piped()).stderr(Stdio::piped());
+    if let Some(sid) = session_id { cmd.arg("--resume").arg(sid); }
 
-    if let Some(sid) = session_id {
-        cmd.arg("--resume").arg(sid);
-    }
-
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| format!("Failed to start claude CLI: {}. Is it installed?", e))?;
-
+    let mut child = cmd.spawn().map_err(|e| format!("Failed to start claude CLI: {}. Is it installed?", e))?;
     let stdout = child.stdout.take().ok_or("Failed to capture stdout")?;
     let stderr = child.stderr.take();
     let reader = BufReader::new(stdout);
@@ -242,15 +251,8 @@ async fn run_agent(
     let mut had_text = false;
 
     while let Ok(Some(line)) = lines.next_line().await {
-        if line.trim().is_empty() {
-            continue;
-        }
-
-        let value: serde_json::Value = match serde_json::from_str(&line) {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-
+        if line.trim().is_empty() { continue; }
+        let value: serde_json::Value = match serde_json::from_str(&line) { Ok(v) => v, Err(_) => continue };
         let msg_type = value["type"].as_str().unwrap_or("");
 
         match msg_type {
@@ -263,43 +265,19 @@ async fn run_agent(
             }
             "stream_event" => {
                 let event = &value["event"];
-                let event_type = event["type"].as_str().unwrap_or("");
-
-                match event_type {
+                match event["type"].as_str().unwrap_or("") {
                     "content_block_start" => {
-                        let index = event["index"].as_u64().unwrap_or(0) as usize;
-                        let block_type = event["content_block"]["type"]
-                            .as_str()
-                            .unwrap_or("")
-                            .to_string();
-
-                        while block_types.len() <= index {
-                            block_types.push(String::new());
-                        }
-                        block_types[index] = block_type.clone();
-
-                        if block_type == "text" {
-                            let _ = app.emit("agent:status", "active");
-                        }
+                        let idx = event["index"].as_u64().unwrap_or(0) as usize;
+                        let bt = event["content_block"]["type"].as_str().unwrap_or("").to_string();
+                        while block_types.len() <= idx { block_types.push(String::new()); }
+                        block_types[idx] = bt.clone();
+                        if bt == "text" { let _ = app.emit("agent:status", "active"); }
                     }
                     "content_block_delta" => {
-                        let index = event["index"].as_u64().unwrap_or(0) as usize;
-                        let block_type =
-                            block_types.get(index).map(|s| s.as_str()).unwrap_or("");
-
-                        match block_type {
-                            "text" => {
-                                if let Some(text) = event["delta"]["text"].as_str() {
-                                    current_text.push_str(text);
-                                    had_text = true;
-                                    let _ = app.emit("agent:text-delta", text);
-                                }
-                            }
-                            "thinking" => {
-                                if let Some(text) = event["delta"]["thinking"].as_str() {
-                                    current_thinking.push_str(text);
-                                }
-                            }
+                        let idx = event["index"].as_u64().unwrap_or(0) as usize;
+                        match block_types.get(idx).map(|s| s.as_str()).unwrap_or("") {
+                            "text" => { if let Some(t) = event["delta"]["text"].as_str() { current_text.push_str(t); had_text = true; let _ = app.emit("agent:text-delta", t); } }
+                            "thinking" => { if let Some(t) = event["delta"]["thinking"].as_str() { current_thinking.push_str(t); } }
                             _ => {}
                         }
                     }
@@ -307,130 +285,40 @@ async fn run_agent(
                 }
             }
             "assistant" => {
-                // Turn complete — finalize text/thinking, then emit actions
+                let _ = app.emit("agent:turn-end", serde_json::json!({
+                    "had_text": had_text,
+                    "thinking": if current_thinking.is_empty() { None } else { Some(&current_thinking) },
+                }));
 
-                // Emit turn-end so frontend can finalize streamed text
-                let _ = app.emit(
-                    "agent:turn-end",
-                    serde_json::json!({
-                        "had_text": had_text,
-                        "thinking": if current_thinking.is_empty() { None } else { Some(&current_thinking) },
-                    }),
-                );
-
-                // Process tool_use blocks for file actions
                 if let Some(content) = value["message"]["content"].as_array() {
                     for block in content {
-                        if block["type"].as_str() != Some("tool_use") {
-                            continue;
-                        }
-
+                        if block["type"].as_str() != Some("tool_use") { continue; }
                         let name = block["name"].as_str().unwrap_or("");
                         let input = &block["input"];
-
                         let action = match name {
-                            "Read" => {
-                                let path =
-                                    relativize_path(input["file_path"].as_str().unwrap_or(""), cwd);
-                                serde_json::json!({
-                                    "kind": "read",
-                                    "path": path,
-                                })
-                            }
-                            "Write" => {
-                                let path =
-                                    relativize_path(input["file_path"].as_str().unwrap_or(""), cwd);
-                                let content = input["content"].as_str().unwrap_or("");
-                                serde_json::json!({
-                                    "kind": "create",
-                                    "path": path,
-                                    "content": content,
-                                })
-                            }
-                            "Edit" => {
-                                let path =
-                                    relativize_path(input["file_path"].as_str().unwrap_or(""), cwd);
-                                let old = input["old_string"].as_str().unwrap_or("");
-                                let new = input["new_string"].as_str().unwrap_or("");
-                                let diff = compute_diff(old, new);
-                                serde_json::json!({
-                                    "kind": "edit",
-                                    "path": path,
-                                    "diff": diff,
-                                })
-                            }
-                            "MultiEdit" => {
-                                let path =
-                                    relativize_path(input["file_path"].as_str().unwrap_or(""), cwd);
-                                // Combine all edits into one diff
-                                let mut all_diffs = Vec::new();
-                                if let Some(edits) = input["edits"].as_array() {
-                                    for edit in edits {
-                                        let old = edit["old_string"].as_str().unwrap_or("");
-                                        let new = edit["new_string"].as_str().unwrap_or("");
-                                        all_diffs.extend(compute_diff(old, new));
-                                    }
-                                }
-                                serde_json::json!({
-                                    "kind": "edit",
-                                    "path": path,
-                                    "diff": all_diffs,
-                                })
-                            }
-                            "Bash" => {
-                                let command = input["command"].as_str().unwrap_or("");
-                                serde_json::json!({
-                                    "kind": "run",
-                                    "command": command,
-                                })
-                            }
-                            "Glob" | "Grep" => {
-                                let pattern = input["pattern"]
-                                    .as_str()
-                                    .or_else(|| input["glob"].as_str())
-                                    .unwrap_or("");
-                                serde_json::json!({
-                                    "kind": "read",
-                                    "path": pattern,
-                                })
-                            }
+                            "Read" => serde_json::json!({ "kind": "read", "path": relativize_path(input["file_path"].as_str().unwrap_or(""), cwd) }),
+                            "Write" => serde_json::json!({ "kind": "create", "path": relativize_path(input["file_path"].as_str().unwrap_or(""), cwd), "content": input["content"].as_str().unwrap_or("") }),
+                            "Edit" => { let p = relativize_path(input["file_path"].as_str().unwrap_or(""), cwd); serde_json::json!({ "kind": "edit", "path": p, "diff": compute_diff(input["old_string"].as_str().unwrap_or(""), input["new_string"].as_str().unwrap_or("")) }) }
+                            "MultiEdit" => { let p = relativize_path(input["file_path"].as_str().unwrap_or(""), cwd); let mut d = Vec::new(); if let Some(edits) = input["edits"].as_array() { for e in edits { d.extend(compute_diff(e["old_string"].as_str().unwrap_or(""), e["new_string"].as_str().unwrap_or(""))); } } serde_json::json!({ "kind": "edit", "path": p, "diff": d }) }
+                            "Bash" => serde_json::json!({ "kind": "run", "command": input["command"].as_str().unwrap_or("") }),
+                            "Glob" | "Grep" => serde_json::json!({ "kind": "read", "path": input["pattern"].as_str().or_else(|| input["glob"].as_str()).unwrap_or("") }),
                             _ => continue,
                         };
-
                         let _ = app.emit("agent:action", action);
                     }
                 }
-
-                // Reset for next turn
-                current_text.clear();
-                current_thinking.clear();
-                block_types.clear();
-                had_text = false;
-            }
-            "result" => {
-                // Final result — response is complete
+                current_text.clear(); current_thinking.clear(); block_types.clear(); had_text = false;
             }
             _ => {}
         }
     }
 
-    // Read stderr and wait for child to exit
-    let err_output = if let Some(mut se) = stderr {
-        let mut buf = String::new();
-        let _ = tokio::io::AsyncReadExt::read_to_string(&mut se, &mut buf).await;
-        buf
-    } else {
-        String::new()
-    };
-
+    let err_output = if let Some(mut se) = stderr { let mut buf = String::new(); let _ = tokio::io::AsyncReadExt::read_to_string(&mut se, &mut buf).await; buf } else { String::new() };
     let status = child.wait().await.map_err(|e| e.to_string())?;
     if !status.success() {
         let detail = err_output.trim();
-        if !detail.is_empty() {
-            return Err(format!("Claude error: {}", detail));
-        }
+        if !detail.is_empty() { return Err(format!("Claude error: {}", detail)); }
         return Err(format!("Claude exited with status: {}", status));
     }
-
     Ok(())
 }

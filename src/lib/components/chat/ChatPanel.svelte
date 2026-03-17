@@ -3,8 +3,6 @@
   import { agentStore } from "$lib/stores/agent.svelte";
   import { agent } from "$lib/tauri/commands";
   import { autoscroll } from "$lib/actions/autoscroll";
-  import { startDemo } from "$lib/demo/runner";
-  import { renderMarkdown } from "$lib/utils/markdown";
   import AgentMessage from "./AgentMessage.svelte";
   import ActionBlock from "./ActionBlock.svelte";
   import { Diamond } from "lucide-svelte";
@@ -30,7 +28,6 @@
         <Diamond size={36} class="opacity-15" />
         <span class="text-[13px]">describe what you want to build</span>
         <span class="text-[11px] opacity-50">the agent will read, create, and edit your files</span>
-        <button onclick={() => startDemo()} class="mt-3 cursor-pointer text-[11px] text-[--color-text-muted] px-4 py-1.5 rounded border border-[--color-border] hover:bg-[--color-bg-hover] transition-colors">▶ or watch a demo</button>
       </div>
     {:else}
       {#each chatStore.messages as msg (msg.id)}
@@ -62,7 +59,6 @@
     {/if}
   </div>
 
-  <!-- Input -->
   <div class="px-4 py-3 border-t border-[--color-border] bg-[--color-bg-panel]">
     <div class="flex items-center gap-2 bg-[--color-bg-surface] rounded-md border border-[--color-border] px-3">
       <span class="text-[--color-accent] text-[13px] shrink-0">❯</span>

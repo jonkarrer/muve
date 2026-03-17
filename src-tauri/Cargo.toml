@@ -20,3 +20,5 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["process", "io-util", "sync"] }
 similar = "2"
+notify = "7"
+notify-debouncer-mini = "0.5"
