@@ -36,13 +36,11 @@ export async function setupAgentListeners() {
       const path = "path" in action ? action.path : "";
       chatStore.addMessage({ role: "agent", type: "action", id: crypto.randomUUID(), timestamp: ts(), action, status: "applied" });
       if (path) highlightFile(path, action.kind);
-      if (action.kind === "create" && "content" in action) { filesStore.selectFile(path); filesStore.openFileInTab(path, action.content, "text"); }
     }),
 
     onAgentDone(async () => {
       agentStore.setStatus("idle");
       await refreshFileTree();
-      await refreshOpenTabs();
     }),
 
     onAgentError((error) => {
@@ -51,17 +49,8 @@ export async function setupAgentListeners() {
       thinking = ""; streamId = null;
     }),
 
-    // File system watcher — catches writes from any source
     onFsChanged(async ({ paths }) => {
-      for (const p of paths) {
-        highlightFile(p, "edit");
-        // Refresh content of open tabs that were modified
-        const openFile = filesStore.openFiles.find(f => f.path === p);
-        if (openFile) {
-          try { const c = await fsCommands.readFile(p); if (c !== openFile.content) openFile.content = c; } catch {}
-        }
-      }
-      // Refresh tree to pick up new/deleted files
+      for (const p of paths) highlightFile(p, "edit");
       await refreshFileTree();
     }),
   ]);
@@ -85,10 +74,4 @@ export async function refreshFileTree() {
     const cwd = await project.getCwd();
     filesStore.setTree(await fsCommands.listDirectory(cwd));
   } catch (e) { console.error("Failed to refresh file tree:", e); }
-}
-
-async function refreshOpenTabs() {
-  for (const f of filesStore.openFiles) {
-    try { const c = await fsCommands.readFile(f.path); if (c !== f.content) f.content = c; } catch {}
-  }
 }

@@ -9,9 +9,7 @@
 </script>
 
 <script lang="ts">
-  import type { AgentActionMessage, FileAction } from "$lib/tauri/types";
-  import { filesStore } from "$lib/stores/files.svelte";
-  import { fs as fsCommands } from "$lib/tauri/commands";
+  import type { AgentActionMessage } from "$lib/tauri/types";
   import DiffView from "./DiffView.svelte";
 
   let { msg }: { msg: AgentActionMessage } = $props();
@@ -20,15 +18,6 @@
   let label = $derived(action.kind === "run" && "command" in action ? action.command : "path" in action ? action.path : "");
   let hasDiff = $derived(action.kind === "edit" && "diff" in action && action.diff.length > 0);
   let hasPreview = $derived(action.kind === "create" && "content" in action && !!action.content);
-
-  async function handleFileClick() {
-    if (action.kind === "run" || !("path" in action)) return;
-    filesStore.selectFile(action.path);
-    try {
-      const content = action.kind === "create" ? action.content : await fsCommands.readFile(action.path);
-      filesStore.openFileInTab(action.path, content);
-    } catch (e) { console.error("Failed to open file:", e); }
-  }
 </script>
 
 <div class="flex gap-2.5 px-4 py-2">
@@ -37,11 +26,7 @@
     <div class="bg-[--color-bg-surface] rounded-md border border-[--color-border] my-1 overflow-hidden">
       <div class="px-3 py-1.5 flex items-center gap-2" class:border-b={hasDiff || hasPreview} class:border-[--color-border]={hasDiff || hasPreview}>
         <span class="text-[10px] font-semibold px-1.5 py-0.5 rounded tracking-wider" style:color={badge.color} style:background={badge.bg}>{badge.label}</span>
-        {#if action.kind === "run"}
-          <span class="text-[12.5px] text-[--color-muve-purple] truncate">{label}</span>
-        {:else}
-          <button onclick={handleFileClick} class="text-[12.5px] text-[--color-muve-blue] cursor-pointer hover:underline bg-transparent border-none truncate">{label}</button>
-        {/if}
+        <span class="text-[12.5px] truncate" class:text-[--color-muve-purple]={action.kind === "run"} class:text-[--color-muve-blue]={action.kind !== "run"}>{label}</span>
       </div>
       {#if hasDiff && action.kind === "edit"}
         <DiffView diff={action.diff} />

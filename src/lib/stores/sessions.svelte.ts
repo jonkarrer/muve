@@ -58,7 +58,7 @@ async function createSession(cwd: string): Promise<string> {
   const id = crypto.randomUUID();
   sessions.push({
     id, cwd, name: folderName(cwd), claudeSessionId: null, messages: [],
-    files: { openFiles: [], activeTabIndex: 0, expandedDirs: {}, selectedFile: null },
+    files: { expandedDirs: {}, selectedFile: null },
   });
   activeSessionId = id;
 

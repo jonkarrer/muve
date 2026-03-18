@@ -26,26 +26,14 @@
 
   const DEFAULT_ICON = { icon: "○", color: "#5c6a7a" };
 
-  const LANG_MAP: Record<string, string> = {
-    py: "python", js: "javascript", ts: "javascript",
-    rs: "rust", json: "json", md: "markdown",
-    svelte: "html", html: "html", css: "css",
-  };
-
   function getFileIcon(name: string) {
     const ext = name.startsWith(".") ? name.slice(1) : name.split(".").pop() ?? "";
     return FILE_ICONS[ext] ?? DEFAULT_ICON;
-  }
-
-  function detectLanguage(name: string): string {
-    const ext = name.split(".").pop()?.toLowerCase() ?? "";
-    return LANG_MAP[ext] ?? "text";
   }
 </script>
 
 <script lang="ts">
   import { filesStore } from "$lib/stores/files.svelte";
-  import { fs as fsCommands } from "$lib/tauri/commands";
   import type { FileNode } from "$lib/tauri/types";
   import FileTreeNode from "./FileTreeNode.svelte";
 
@@ -59,17 +47,11 @@
     isAgentActive ? ACTION_COLORS[filesStore.activeAgentAction!] ?? "transparent" : "transparent"
   );
 
-  async function handleClick() {
+  function handleClick() {
     if (node.is_dir) {
       filesStore.toggleDir(node.path);
     } else {
       filesStore.selectFile(node.path);
-      try {
-        const content = await fsCommands.readFile(node.path);
-        filesStore.openFileInTab(node.path, content, detectLanguage(node.name));
-      } catch (e) {
-        console.error("Failed to read file:", e);
-      }
     }
   }
 </script>
