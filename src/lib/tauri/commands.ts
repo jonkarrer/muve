@@ -10,11 +10,11 @@ export const fs = {
 };
 
 export const agent = {
-  sendMessage: (message: string) =>
-    invoke<void>("send_message", { message }),
+  sendMessage: (message: string, tabId: string, model?: string) =>
+    invoke<void>("send_message", { message, tabId, model: model ?? null }),
 
-  isRunning: () =>
-    invoke<boolean>("is_agent_running"),
+  isRunning: (tabId: string) =>
+    invoke<boolean>("is_agent_running", { tabId }),
 };
 
 export const project = {
@@ -32,4 +32,7 @@ export const project = {
 
   stopWatching: () =>
     invoke<void>("stop_watching"),
+
+  getGitBranch: () =>
+    invoke<string>("get_git_branch"),
 };

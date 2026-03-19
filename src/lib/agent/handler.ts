@@ -1,52 +1,96 @@
-import { onAgentStatus, onAgentTextDelta, onAgentThinkingDelta, onAgentTurnEnd, onAgentAction, onAgentDone, onAgentError, onAgentSession, onFsChanged } from "$lib/tauri/events";
+import { onAgentStatus, onAgentTextDelta, onAgentTurnEnd, onAgentAction, onAgentDone, onAgentError, onAgentSession, onFsChanged } from "$lib/tauri/events";
 import { fs as fsCommands, project } from "$lib/tauri/commands";
 import { chatStore } from "$lib/stores/chat.svelte";
 import { filesStore } from "$lib/stores/files.svelte";
 import { agentStore } from "$lib/stores/agent.svelte";
 import { sessionsStore } from "$lib/stores/sessions.svelte";
-import type { AgentStatus, FileAction } from "$lib/tauri/types";
+import type { AgentStatus, FileAction, Message } from "$lib/tauri/types";
 
 const ts = () => new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
-let thinking = "";
-let streamId: string | null = null;
+// Per-tab streaming state
+const tabStreams = new Map<string, { streamId: string; content: string; thinking: string }>();
 let unlisteners: (() => void)[] = [];
 let hlSeq = 0;
+
+function isActiveTab(tabId: string): boolean {
+  return tabId === sessionsStore.activeSessionId;
+}
+
+function getSession(tabId: string) {
+  return sessionsStore.sessions.find(s => s.id === tabId);
+}
+
+function pushMessage(tabId: string, msg: Message) {
+  if (isActiveTab(tabId)) {
+    chatStore.addMessage(msg);
+  } else {
+    const s = getSession(tabId);
+    if (s) s.messages.push(msg);
+  }
+}
+
+function getStream(tabId: string) {
+  let s = tabStreams.get(tabId);
+  if (!s) { s = { streamId: crypto.randomUUID(), content: "", thinking: "" }; tabStreams.set(tabId, s); }
+  return s;
+}
 
 export async function setupAgentListeners() {
   teardownAgentListeners();
   unlisteners = await Promise.all([
-    onAgentStatus((s) => agentStore.setStatus(s as AgentStatus)),
-    onAgentSession((sid) => sessionsStore.updateClaudeSessionId(sid)),
-
-    onAgentTextDelta((text) => {
-      if (!streamId) { streamId = crypto.randomUUID(); chatStore.startStream(streamId); }
-      chatStore.appendStreamChunk(text);
+    onAgentStatus(({ tab_id, status }) => {
+      if (isActiveTab(tab_id)) agentStore.setStatus(status as AgentStatus);
     }),
 
-    onAgentThinkingDelta((text) => { thinking += text; }),
-
-    onAgentTurnEnd((data) => {
-      if (data.had_text && streamId) chatStore.finalizeStream(streamId, thinking || undefined);
-      else if (thinking) chatStore.addMessage({ role: "agent", type: "text", id: crypto.randomUUID(), timestamp: ts(), content: "", thinking });
-      thinking = ""; streamId = null;
+    onAgentSession(({ tab_id, session_id }) => {
+      const s = getSession(tab_id);
+      if (s) s.claudeSessionId = session_id;
     }),
 
-    onAgentAction((action: FileAction) => {
-      const path = "path" in action ? action.path : "";
-      chatStore.addMessage({ role: "agent", type: "action", id: crypto.randomUUID(), timestamp: ts(), action, status: "applied" });
-      if (path) highlightFile(path, action.kind);
+    onAgentTextDelta(({ tab_id, text }) => {
+      const stream = getStream(tab_id);
+      stream.content += text;
+      if (isActiveTab(tab_id)) {
+        if (!chatStore.isStreaming) chatStore.startStream(stream.streamId);
+        chatStore.appendStreamChunk(text);
+      }
     }),
 
-    onAgentDone(async () => {
-      agentStore.setStatus("idle");
+    onAgentTurnEnd(({ tab_id, had_text, thinking: thinkingText }) => {
+      const stream = tabStreams.get(tab_id);
+      const thinkingContent = stream?.thinking || (thinkingText ?? "") || "";
+      if (had_text && stream) {
+        const msg: Message = { role: "agent", type: "text", id: stream.streamId, timestamp: ts(), content: stream.content, thinking: thinkingContent || undefined };
+        if (isActiveTab(tab_id)) {
+          chatStore.finalizeStream(stream.streamId, thinkingContent || undefined);
+        } else {
+          const s = getSession(tab_id);
+          if (s) s.messages.push(msg);
+        }
+      } else if (thinkingContent) {
+        pushMessage(tab_id, { role: "agent", type: "text", id: crypto.randomUUID(), timestamp: ts(), content: "", thinking: thinkingContent });
+      }
+      tabStreams.delete(tab_id);
+    }),
+
+    onAgentAction((payload) => {
+      const { tab_id, ...action } = payload;
+      const path = "path" in action ? (action as any).path : "";
+      pushMessage(tab_id, { role: "agent", type: "action", id: crypto.randomUUID(), timestamp: ts(), action: action as FileAction, status: "applied" });
+      if (path && isActiveTab(tab_id)) highlightFile(path, (action as FileAction).kind);
+    }),
+
+    onAgentDone(async ({ tab_id }) => {
+      tabStreams.delete(tab_id);
+      if (isActiveTab(tab_id)) agentStore.setStatus("idle");
       await refreshFileTree();
     }),
 
-    onAgentError((error) => {
-      agentStore.setStatus("error");
-      chatStore.addMessage({ role: "agent", type: "text", id: crypto.randomUUID(), timestamp: ts(), content: `Error: ${error}` });
-      thinking = ""; streamId = null;
+    onAgentError(({ tab_id, error }) => {
+      tabStreams.delete(tab_id);
+      if (isActiveTab(tab_id)) agentStore.setStatus("error");
+      pushMessage(tab_id, { role: "agent", type: "text", id: crypto.randomUUID(), timestamp: ts(), content: `Error: ${error}` });
     }),
 
     onFsChanged(async ({ paths }) => {
@@ -58,7 +102,7 @@ export async function setupAgentListeners() {
 
 export function teardownAgentListeners() {
   unlisteners.forEach((u) => u());
-  unlisteners = []; thinking = ""; streamId = null; hlSeq = 0;
+  unlisteners = []; tabStreams.clear(); hlSeq = 0;
 }
 
 function highlightFile(path: string, kind: string) {

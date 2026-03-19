@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use similar::{ChangeTag, TextDiff};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::collections::HashSet;
 use std::sync::mpsc as std_mpsc;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -15,7 +16,7 @@ use tokio::sync::Mutex;
 pub struct AppState {
     pub cwd: Mutex<String>,
     pub session_id: Mutex<Option<String>>,
-    pub is_running: Mutex<bool>,
+    pub running_sessions: Mutex<HashSet<String>>,
     pub watcher_stop: Mutex<Option<std_mpsc::Sender<()>>>,
 }
 
@@ -190,34 +191,49 @@ pub async fn stop_watching(state: State<'_, AppState>) -> Result<(), String> {
     Ok(())
 }
 
+// --- Git Commands ---
+
+#[tauri::command]
+pub async fn get_git_branch(state: State<'_, AppState>) -> Result<String, String> {
+    let cwd = state.cwd.lock().await.clone();
+    let output = std::process::Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .current_dir(&cwd)
+        .output();
+    match output {
+        Ok(o) if o.status.success() => Ok(String::from_utf8_lossy(&o.stdout).trim().to_string()),
+        _ => Ok("unknown".to_string()),
+    }
+}
+
 // --- Agent Commands ---
 
 #[tauri::command]
-pub async fn send_message(app: AppHandle, message: String, state: State<'_, AppState>) -> Result<(), String> {
+pub async fn send_message(app: AppHandle, message: String, model: Option<String>, tab_id: String, state: State<'_, AppState>) -> Result<(), String> {
     {
-        let mut running = state.is_running.lock().await;
-        if *running { return Err("Agent is already processing a message".to_string()); }
-        *running = true;
+        let mut running = state.running_sessions.lock().await;
+        if running.contains(&tab_id) { return Err("Agent is already processing a message".to_string()); }
+        running.insert(tab_id.clone());
     }
     let cwd = state.cwd.lock().await.clone();
     let session_id = state.session_id.lock().await.clone();
 
     tokio::spawn(async move {
-        let result = run_agent(app.clone(), &message, &cwd, session_id.as_deref()).await;
+        let result = run_agent(app.clone(), &message, &cwd, session_id.as_deref(), model.as_deref(), &tab_id).await;
         let state = app.state::<AppState>();
-        *state.is_running.lock().await = false;
+        state.running_sessions.lock().await.remove(&tab_id);
         match result {
-            Ok(_) => { let _ = app.emit("agent:done", ()); }
-            Err(e) => { let _ = app.emit("agent:error", &e); }
+            Ok(_) => { let _ = app.emit("agent:done", serde_json::json!({ "tab_id": tab_id })); }
+            Err(e) => { let _ = app.emit("agent:error", serde_json::json!({ "tab_id": tab_id, "error": e })); }
         }
-        let _ = app.emit("agent:status", "idle");
+        let _ = app.emit("agent:status", serde_json::json!({ "tab_id": tab_id, "status": "idle" }));
     });
     Ok(())
 }
 
 #[tauri::command]
-pub async fn is_agent_running(state: State<'_, AppState>) -> Result<bool, String> {
-    Ok(*state.is_running.lock().await)
+pub async fn is_agent_running(tab_id: String, state: State<'_, AppState>) -> Result<bool, String> {
+    Ok(state.running_sessions.lock().await.contains(&tab_id))
 }
 
 #[tauri::command]
@@ -228,8 +244,8 @@ pub async fn set_session_id(id: Option<String>, state: State<'_, AppState>) -> R
 
 // --- Agent Runner ---
 
-async fn run_agent(app: AppHandle, message: &str, cwd: &str, session_id: Option<&str>) -> Result<(), String> {
-    let _ = app.emit("agent:status", "thinking");
+async fn run_agent(app: AppHandle, message: &str, cwd: &str, session_id: Option<&str>, model: Option<&str>, tab_id: &str) -> Result<(), String> {
+    let _ = app.emit("agent:status", serde_json::json!({ "tab_id": tab_id, "status": "thinking" }));
 
     let mut cmd = Command::new("claude");
     cmd.arg("-p").arg(message)
@@ -238,6 +254,7 @@ async fn run_agent(app: AppHandle, message: &str, cwd: &str, session_id: Option<
         .arg("--permission-mode").arg("acceptEdits")
         .current_dir(cwd).stdout(Stdio::piped()).stderr(Stdio::piped());
     if let Some(sid) = session_id { cmd.arg("--resume").arg(sid); }
+    if let Some(m) = model { cmd.arg("--model").arg(m); }
 
     let mut child = cmd.spawn().map_err(|e| format!("Failed to start claude CLI: {}. Is it installed?", e))?;
     let stdout = child.stdout.take().ok_or("Failed to capture stdout")?;
@@ -261,7 +278,7 @@ async fn run_agent(app: AppHandle, message: &str, cwd: &str, session_id: Option<
                 if let Some(sid) = value["session_id"].as_str() {
                     let state = app.state::<AppState>();
                     *state.session_id.lock().await = Some(sid.to_string());
-                    let _ = app.emit("agent:session", sid);
+                    let _ = app.emit("agent:session", serde_json::json!({ "tab_id": tab_id, "session_id": sid }));
                 }
             }
             "stream_event" => {
@@ -272,12 +289,12 @@ async fn run_agent(app: AppHandle, message: &str, cwd: &str, session_id: Option<
                         let bt = event["content_block"]["type"].as_str().unwrap_or("").to_string();
                         while block_types.len() <= idx { block_types.push(String::new()); }
                         block_types[idx] = bt.clone();
-                        if bt == "text" { let _ = app.emit("agent:status", "active"); }
+                        if bt == "text" { let _ = app.emit("agent:status", serde_json::json!({ "tab_id": tab_id, "status": "active" })); }
                     }
                     "content_block_delta" => {
                         let idx = event["index"].as_u64().unwrap_or(0) as usize;
                         match block_types.get(idx).map(|s| s.as_str()).unwrap_or("") {
-                            "text" => { if let Some(t) = event["delta"]["text"].as_str() { current_text.push_str(t); had_text = true; let _ = app.emit("agent:text-delta", t); } }
+                            "text" => { if let Some(t) = event["delta"]["text"].as_str() { current_text.push_str(t); had_text = true; let _ = app.emit("agent:text-delta", serde_json::json!({ "tab_id": tab_id, "text": t })); } }
                             "thinking" => { if let Some(t) = event["delta"]["thinking"].as_str() { current_thinking.push_str(t); } }
                             _ => {}
                         }
@@ -287,6 +304,7 @@ async fn run_agent(app: AppHandle, message: &str, cwd: &str, session_id: Option<
             }
             "assistant" => {
                 let _ = app.emit("agent:turn-end", serde_json::json!({
+                    "tab_id": tab_id,
                     "had_text": had_text,
                     "thinking": if current_thinking.is_empty() { None } else { Some(&current_thinking) },
                 }));
@@ -326,7 +344,9 @@ async fn run_agent(app: AppHandle, message: &str, cwd: &str, session_id: Option<
                             "Glob" | "Grep" => serde_json::json!({ "kind": "read", "path": input["pattern"].as_str().or_else(|| input["glob"].as_str()).unwrap_or("") }),
                             _ => continue,
                         };
-                        let _ = app.emit("agent:action", action);
+                        let mut tagged = action;
+                        tagged["tab_id"] = serde_json::json!(tab_id);
+                        let _ = app.emit("agent:action", tagged);
                     }
                 }
                 recent_write_paths.clear();

@@ -15,7 +15,7 @@ pub fn run() {
         .manage(AppState {
             cwd: Mutex::new(cwd),
             session_id: Mutex::new(None),
-            is_running: Mutex::new(false),
+            running_sessions: Mutex::new(std::collections::HashSet::new()),
             watcher_stop: Mutex::new(None),
         })
         .invoke_handler(tauri::generate_handler![
@@ -28,6 +28,7 @@ pub fn run() {
             commands::set_session_id,
             commands::start_watching,
             commands::stop_watching,
+            commands::get_git_branch,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Muve");

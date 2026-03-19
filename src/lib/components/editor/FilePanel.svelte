@@ -43,6 +43,7 @@
 </script>
 
 <div class="flex flex-col h-full">
+  <!-- Actions header -->
   <div class="px-3 py-2 text-[10px] text-[--color-text-dim] uppercase tracking-widest border-b border-[--color-border] flex items-center gap-2">
     actions
     {#if isWorking}
